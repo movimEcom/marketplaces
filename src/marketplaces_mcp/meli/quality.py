@@ -1,6 +1,7 @@
-"""Listing quality report: buckets the seller's items by Mercado Libre's
-`health` score (0..1, how complete/good a listing's title/photos/attributes
-are) into the same four bands Mercado Libre's own seller tools use.
+"""Listing quality report: buckets the seller's items by the score from
+Mercado Libre's `/item/{id}/performance` endpoint (0..100 -- the same number
+and "objectives" shown in the seller center's own quality widget; the older
+`health` item field is a different, deprecated metric and does not match it).
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ BANDS = (
     ("critico", 0, 39, "Crítico", "#d03b3b"),
 )
 
-_ITEM_ATTRIBUTES = ["id", "title", "health", "status", "permalink"]
+_ITEM_ATTRIBUTES = ["id", "title", "status", "permalink"]
 
 
 def _band_for_score(score: int) -> str:
@@ -38,15 +39,18 @@ class QualityItem:
     id: str
     title: str
     score: int
+    level: str
     status: str
     permalink: str
     band: str
+    pending_objectives: list[str] = field(default_factory=list)
 
 
 @dataclass
 class QualityReport:
     generated_at: str
     total: int
+    skipped: int
     band_counts: dict[str, int]
     items: list[QualityItem] = field(default_factory=list)
 
@@ -54,28 +58,45 @@ class QualityReport:
         return [item for item in self.items if item.band == band]
 
 
+def _pending_objectives(performance: dict) -> list[str]:
+    return [
+        bucket.get("title", bucket.get("key", ""))
+        for bucket in performance.get("buckets", [])
+        if bucket.get("status") != "COMPLETED"
+    ]
+
+
 def fetch_quality_report(
-    client: MeliClient, status: str | None = "active"
+    client: MeliClient,
+    status: str | None = "active",
+    on_progress=None,
+    item_ids: list[str] | None = None,
 ) -> QualityReport:
-    item_ids = client.list_all_my_item_ids(status=status)
-    raw_items = client.multiget_items(item_ids, attributes=_ITEM_ATTRIBUTES)
+    if item_ids is None:
+        item_ids = client.list_all_my_item_ids(status=status)
+    metadata_by_id = {
+        raw["id"]: raw for raw in client.multiget_items(item_ids, attributes=_ITEM_ATTRIBUTES)
+    }
+    performance_by_id = client.get_items_performance(item_ids, on_progress=on_progress)
 
     items: list[QualityItem] = []
     band_counts = {key: 0 for key, *_ in BANDS}
 
-    for raw in raw_items:
-        health = raw.get("health")
-        score = round((health or 0) * 100)
+    for item_id, perf in performance_by_id.items():
+        meta = metadata_by_id.get(item_id, {})
+        score = round(perf.get("score", 0))
         band = _band_for_score(score)
         band_counts[band] += 1
         items.append(
             QualityItem(
-                id=raw["id"],
-                title=raw.get("title", ""),
+                id=item_id,
+                title=meta.get("title", ""),
                 score=score,
-                status=raw.get("status", ""),
-                permalink=raw.get("permalink", ""),
+                level=perf.get("level", ""),
+                status=meta.get("status", ""),
+                permalink=meta.get("permalink", ""),
                 band=band,
+                pending_objectives=_pending_objectives(perf),
             )
         )
 
@@ -84,6 +105,7 @@ def fetch_quality_report(
     return QualityReport(
         generated_at=datetime.now(timezone.utc).isoformat(),
         total=len(items),
+        skipped=len(item_ids) - len(items),
         band_counts=band_counts,
         items=items,
     )
@@ -108,12 +130,13 @@ def _item_row(item: QualityItem, color_by_band: dict[str, str]) -> str:
     color = color_by_band[item.band]
     title = _esc(item.title) or item.id
     link = _esc(item.permalink) if item.permalink else "#"
+    objectives = ", ".join(item.pending_objectives) or "—"
     return f"""
         <tr>
           <td class="num">{item.score}</td>
           <td><span class="dot" style="background:{color}"></span>{item.band.capitalize()}</td>
           <td><a href="{link}" target="_blank" rel="noopener">{title}</a></td>
-          <td>{_esc(item.status)}</td>
+          <td>{_esc(objectives)}</td>
         </tr>"""
 
 
@@ -134,7 +157,7 @@ def render_html(report: QualityReport, seller_label: str = "") -> str:
         table_html = f"""
         <table>
           <thead>
-            <tr><th>Score</th><th>Banda</th><th>Publicación</th><th>Estado</th></tr>
+            <tr><th>Score</th><th>Banda</th><th>Publicación</th><th>Objetivos pendientes</th></tr>
           </thead>
           <tbody>{rows}
           </tbody>
@@ -144,6 +167,7 @@ def render_html(report: QualityReport, seller_label: str = "") -> str:
         table_html = '<p class="muted">No hay publicaciones en banda Mejorable o Crítico. \U0001F389</p>'
 
     generated_local = report.generated_at.replace("T", " ").split(".")[0] + " UTC"
+    skipped_note = f" · {report.skipped} sin datos de calidad" if report.skipped else ""
     subtitle = f"Mercado Libre México{' · ' + _esc(seller_label) if seller_label else ''}"
 
     return f"""<!DOCTYPE html>
@@ -277,7 +301,7 @@ def render_html(report: QualityReport, seller_label: str = "") -> str:
 <body>
   <div class="header">
     <h1>Calidad de publicaciones</h1>
-    <p>{subtitle} · {report.total} publicaciones · generado {generated_local}</p>
+    <p>{subtitle} · {report.total} publicaciones{skipped_note} · generado {generated_local}</p>
   </div>
   <div class="content">
     <div class="tiles">{tiles}

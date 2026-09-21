@@ -156,14 +156,17 @@ def meli_get_user(user_id: int | None = None) -> Any:
 
 @mcp.tool()
 def meli_get_listing_quality_summary(status: str | None = "active") -> Any:
-    """Summarize the seller's listing quality (Mercado Libre's `health` score)
+    """Summarize the seller's listing quality (Mercado Libre's `/item/{id}/performance`
+    score, the same number and pending objectives shown in the seller center)
     bucketed into Excelente (80-100) / Bueno (60-79) / Mejorable (40-59) /
-    Crítico (0-39), plus the worst-scoring listings. status: active|paused|
-    closed|None (all)."""
+    Crítico (0-39), plus the worst-scoring listings and what's blocking them.
+    status: active|paused|closed|None (all). Makes one API call per listing,
+    so it can take a while for sellers with many listings."""
     report = fetch_quality_report(get_client(), status=status)
     worst = [i for i in report.items if i.band in ("mejorable", "critico")][:50]
     return {
         "total": report.total,
+        "skipped": report.skipped,
         "band_counts": report.band_counts,
         "band_labels": {key: label for key, _low, _high, label, _color in BANDS},
         "generated_at": report.generated_at,
@@ -172,8 +175,9 @@ def meli_get_listing_quality_summary(status: str | None = "active") -> Any:
                 "id": i.id,
                 "title": i.title,
                 "score": i.score,
+                "level": i.level,
                 "band": i.band,
-                "status": i.status,
+                "pending_objectives": i.pending_objectives,
                 "permalink": i.permalink,
             }
             for i in worst

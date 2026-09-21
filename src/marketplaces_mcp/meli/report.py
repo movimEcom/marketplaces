@@ -15,26 +15,38 @@ from .quality import BANDS, fetch_quality_report, render_html, save_report
 
 
 def main() -> None:
-    output_path = sys.argv[1] if len(sys.argv) > 1 else "quality_report.html"
-    status = None if "--all" in sys.argv else "active"
+    args = sys.argv[1:]
+    flags = {a for a in args if a.startswith("--")}
+    positional = [a for a in args if not a.startswith("--")]
+
+    output_path = positional[0] if positional else "quality_report.html"
+    status = None if "--all" in flags else "active"
 
     settings = load_settings()
     client = MeliClient(settings)
     try:
-        print("Consultando publicaciones y su score de calidad (puede tardar unos segundos)...")
-        report = fetch_quality_report(client, status=status)
+        print("Buscando publicaciones...")
+        item_ids = client.list_all_my_item_ids(status=status)
+        print(f"{len(item_ids)} publicaciones encontradas. Consultando su calidad "
+              "(una llamada por publicación, puede tardar varios minutos)...")
+
+        def progress(done: int, total: int) -> None:
+            if done % 25 == 0 or done == total:
+                print(f"  {done}/{total}")
+
+        report = fetch_quality_report(client, status=status, on_progress=progress, item_ids=item_ids)
     finally:
         client.close()
 
     html = render_html(report, seller_label=f"vendedor {client.user_id}")
     path = save_report(html, output_path)
 
-    print(f"\n{report.total} publicaciones analizadas:")
+    print(f"\n{report.total} publicaciones analizadas" + (f" ({report.skipped} sin datos de calidad, omitidas)" if report.skipped else "") + ":")
     for key, _low, _high, label, _color in BANDS:
         print(f"  {label}: {report.band_counts.get(key, 0)}")
     print(f"\nReporte guardado en: {path.resolve()}")
 
-    if "--open" in sys.argv:
+    if "--open" in flags:
         webbrowser.open(path.resolve().as_uri())
 
 
