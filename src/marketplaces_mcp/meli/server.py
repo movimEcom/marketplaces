@@ -167,7 +167,8 @@ def meli_get_listing_quality_summary(status: str | None = "active") -> Any:
     attributes/pictures are (`is_estimated=True`, `kind="catalog"`; a
     regular item has `is_estimated=False`, `kind="regular"` and its score is
     Mercado Libre's own). Listings with no resolvable signal at all (mostly
-    non-active regular listings) are excluded and counted in `skipped`.
+    non-active regular listings) are placed in Crítico with `score=None`
+    instead of left out (see `skip_reasons` for why).
     status: active|paused|closed|None (all). Makes roughly one API call per
     listing, so it can take a while for sellers with many listings."""
     report = fetch_quality_report(get_client(), status=status)

@@ -27,8 +27,10 @@ onto the same 4-band scale takes two different real signals:
   calls the ficha COMPLETE.
 
 Listings with no resolvable signal at all (mostly non-active regular
-listings, since Mercado Libre doesn't compute quality for those) are kept
-out of the bands rather than guessed at, and reported as `skipped`.
+listings, since Mercado Libre doesn't compute quality for those) are placed
+in Crítico with no `score` -- per explicit user instruction, "no data" is
+treated as the worst case rather than left unclassified. `skip_reasons` /
+`skip_samples` still record why, for diagnostics.
 """
 
 from __future__ import annotations
@@ -173,16 +175,46 @@ def fetch_quality_report(
             )
         )
 
+    # Regular listings Mercado Libre refused to score at all (mostly
+    # non-active ones) go straight to Crítico -- no data to evaluate them by
+    # is treated as the worst case, per explicit instruction, rather than
+    # left unclassified.
+    for item_id in errors_by_id:
+        meta = metadata_by_id.get(item_id, {})
+        band_counts["critico"] += 1
+        items.append(
+            QualityItem(
+                id=item_id,
+                title=meta.get("title", ""),
+                status=meta.get("status", ""),
+                permalink=meta.get("permalink", ""),
+                band="critico",
+                kind="regular",
+                pending_objectives=["Sin datos de calidad (Mercado Libre no la calculó)"],
+            )
+        )
+
     catalog_user_product_ids = [metadata_by_id[i]["user_product_id"] for i in catalog_ids]
     catalog_quality = client.get_catalog_quality_by_user_product(catalog_user_product_ids)
 
-    catalog_resolved = 0
     for item_id in catalog_ids:
         meta = metadata_by_id[item_id]
         resolved = catalog_quality.get(meta["user_product_id"])
         if resolved is None:
-            continue  # no signal at all -- goes to `skipped`, not guessed
-        catalog_resolved += 1
+            # No signal at all -- also straight to Crítico, same as above.
+            band_counts["critico"] += 1
+            items.append(
+                QualityItem(
+                    id=item_id,
+                    title=meta.get("title", ""),
+                    status=meta.get("status", ""),
+                    permalink=meta.get("permalink", ""),
+                    band="critico",
+                    kind="catalog",
+                    pending_objectives=["Sin datos suficientes para evaluar la ficha"],
+                )
+            )
+            continue
         quality_type = resolved.get("quality_type")
         score = _estimate_catalog_score(resolved.get("attributes", []), resolved.get("pictures", []), quality_type)
         band = _band_for_score(score)
@@ -205,12 +237,11 @@ def fetch_quality_report(
         )
 
     items.sort(key=lambda item: item.sort_score)
-    resolved_count = len(performance_by_id) + catalog_resolved
 
     return QualityReport(
         generated_at=datetime.now(timezone.utc).isoformat(),
-        total=resolved_count,
-        skipped=len(item_ids) - resolved_count,
+        total=len(items),
+        skipped=len(item_ids) - len(items),
         band_counts=band_counts,
         items=items,
         skip_reasons=skip_reasons,
