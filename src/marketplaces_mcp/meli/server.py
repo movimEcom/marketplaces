@@ -11,6 +11,7 @@ from mcp.server.mcpserver import MCPServer
 
 from .client import MeliClient
 from .config import load_settings
+from .quality import BANDS, fetch_quality_report, render_html, save_report
 
 mcp = MCPServer("mercadolibre-mexico")
 
@@ -148,6 +149,49 @@ def meli_get_my_reputation() -> Any:
 def meli_get_user(user_id: int | None = None) -> Any:
     """Get public profile info for a user (defaults to the authenticated seller)."""
     return get_client().get_user(user_id)
+
+
+# -- seller: listing quality ----------------------------------------------------
+
+
+@mcp.tool()
+def meli_get_listing_quality_summary(status: str | None = "active") -> Any:
+    """Summarize the seller's listing quality (Mercado Libre's `health` score)
+    bucketed into Excelente (80-100) / Bueno (60-79) / Mejorable (40-59) /
+    Crítico (0-39), plus the worst-scoring listings. status: active|paused|
+    closed|None (all)."""
+    report = fetch_quality_report(get_client(), status=status)
+    worst = [i for i in report.items if i.band in ("mejorable", "critico")][:50]
+    return {
+        "total": report.total,
+        "band_counts": report.band_counts,
+        "band_labels": {key: label for key, _low, _high, label, _color in BANDS},
+        "generated_at": report.generated_at,
+        "worst_items": [
+            {
+                "id": i.id,
+                "title": i.title,
+                "score": i.score,
+                "band": i.band,
+                "status": i.status,
+                "permalink": i.permalink,
+            }
+            for i in worst
+        ],
+    }
+
+
+@mcp.tool()
+def meli_generate_quality_dashboard(
+    output_path: str = "quality_report.html", status: str | None = "active"
+) -> str:
+    """Generate an HTML dashboard of listing quality (like
+    meli_get_listing_quality_summary, but rendered as a styled page) and save
+    it to `output_path` on disk. Returns the absolute path written."""
+    report = fetch_quality_report(get_client(), status=status)
+    html = render_html(report, seller_label=f"vendedor {get_client().user_id}")
+    path = save_report(html, output_path)
+    return str(path.resolve())
 
 
 def main() -> None:

@@ -85,6 +85,44 @@ class MeliClient:
             params["status"] = status
         return self._get(f"/users/{self.user_id}/items/search", params=params)
 
+    def list_all_my_item_ids(self, status: str | None = None) -> list[str]:
+        """Page through `list_my_items` and return every item id.
+
+        The `/users/{id}/items/search` endpoint caps offset+limit at 1000
+        results; sellers with more listings than that need the scroll API
+        instead, which this helper does not implement.
+        """
+        ids: list[str] = []
+        offset = 0
+        page_size = 100
+        while True:
+            page = self.list_my_items(status=status, limit=page_size, offset=offset)
+            results = page.get("results", [])
+            ids.extend(results)
+            total = page.get("paging", {}).get("total", len(ids))
+            offset += len(results)
+            if not results or offset >= total:
+                break
+        return ids
+
+    def multiget_items(
+        self, item_ids: list[str], attributes: list[str] | None = None
+    ) -> list[dict[str, Any]]:
+        """Fetch several items in one call each (Mercado Libre's `/items?ids=`
+        multiget, max 20 ids per request). Skips ids that error individually.
+        """
+        attrs = ",".join(attributes) if attributes else None
+        items: list[dict[str, Any]] = []
+        for i in range(0, len(item_ids), 20):
+            batch = item_ids[i : i + 20]
+            params: dict[str, Any] = {"ids": ",".join(batch)}
+            if attrs:
+                params["attributes"] = attrs
+            for entry in self._get("/items", params=params):
+                if entry.get("code") == 200:
+                    items.append(entry["body"])
+        return items
+
     def create_item(self, item: dict[str, Any]) -> Any:
         return self._post("/items", json=item)
 

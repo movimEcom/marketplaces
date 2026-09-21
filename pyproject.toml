@@ -13,6 +13,7 @@ dependencies = [
 [project.scripts]
 meli-mx-mcp = "marketplaces_mcp.meli.server:main"
 meli-mx-authorize = "marketplaces_mcp.meli.authorize:main"
+meli-mx-quality-report = "marketplaces_mcp.meli.report:main"
 
 [build-system]
 requires = ["hatchling"]

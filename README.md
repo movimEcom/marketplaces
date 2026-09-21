@@ -94,6 +94,28 @@ claude mcp add mercadolibre-mexico -- uv --directory /ruta/a/marketplaces run me
 - `meli_get_my_reputation()`
 - `meli_get_user(user_id)`
 
+**Calidad de publicaciones**
+- `meli_get_listing_quality_summary(status)` — resumen por bandas (Excelente
+  80-100 / Bueno 60-79 / Mejorable 40-59 / Crítico 0-39) según el `health`
+  score de Mercado Libre, más las publicaciones peor rankeadas.
+- `meli_generate_quality_dashboard(output_path, status)` — genera un reporte
+  HTML con esas mismas bandas y una tabla de publicaciones a mejorar.
+
+## Dashboard de calidad sin Claude Code
+
+Si solo quieres el reporte HTML (sin pasar por un cliente MCP), hay un
+comando independiente:
+
+```bash
+uv run meli-mx-quality-report                 # genera quality_report.html
+uv run meli-mx-quality-report reporte.html --open   # nombre custom y lo abre en el navegador
+uv run meli-mx-quality-report --all           # incluye pausadas/cerradas, no solo activas
+```
+
+Es un snapshot bajo demanda: cada corrida vuelve a consultar Mercado Libre y
+regenera el archivo con los datos actuales (no guarda histórico entre
+corridas).
+
 ## Estructura
 
 ```
@@ -102,6 +124,8 @@ src/marketplaces_mcp/meli/
   auth.py       # OAuth2 Authorization Code + PKCE, refresh y almacenamiento de tokens
   authorize.py  # script interactivo de login (meli-mx-authorize)
   client.py     # wrapper HTTP sobre la API REST de Mercado Libre
+  quality.py    # cálculo de bandas de calidad + render del HTML del dashboard
+  report.py     # CLI standalone del dashboard (meli-mx-quality-report)
   server.py     # servidor MCP (FastMCP) que expone las tools (meli-mx-mcp)
 ```
 
