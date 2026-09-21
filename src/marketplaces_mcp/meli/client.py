@@ -111,6 +111,63 @@ class MeliClient:
                     on_progress(done, len(item_ids))
         return results, errors, samples
 
+    def get_user_product(self, user_product_id: str) -> Any:
+        """A catalog-linked listing's item carries a `user_product_id`
+        (instead of `health`/`performance` data). This resolves it to the
+        shared `catalog_product_id`."""
+        return self._get(f"/user-products/{user_product_id}")
+
+    def get_catalog_product(self, catalog_product_id: str) -> Any:
+        """Includes `quality_type` (e.g. "COMPLETE") -- the catalog
+        equivalent of an item's `/performance` score, but shared across every
+        seller listing that same catalog product and only a coarse category,
+        not a 0-100 number: `/products/{id}/performance` 500s for these."""
+        return self._get(f"/products/{catalog_product_id}")
+
+    def get_catalog_quality_by_user_product(
+        self, user_product_ids: list[str], max_workers: int = 8
+    ) -> dict[str, Any]:
+        """For each user_product id, resolve its catalog product and return
+        {user_product_id: {"catalog_product_id":..., "quality_type":...}}.
+        Catalog products are deduplicated so each is only fetched once even
+        if many of the seller's listings share it (e.g. color/size variants).
+        Ids that fail at either step are skipped.
+        """
+        catalog_id_by_user_product: dict[str, str] = {}
+
+        def resolve(user_product_id: str) -> tuple[str, str | None]:
+            try:
+                return user_product_id, self.get_user_product(user_product_id).get("catalog_product_id")
+            except httpx.HTTPStatusError:
+                return user_product_id, None
+
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            for user_product_id, catalog_product_id in pool.map(resolve, user_product_ids):
+                if catalog_product_id:
+                    catalog_id_by_user_product[user_product_id] = catalog_product_id
+
+        unique_catalog_ids = sorted(set(catalog_id_by_user_product.values()))
+        quality_type_by_catalog_id: dict[str, str] = {}
+
+        def fetch_quality(catalog_product_id: str) -> tuple[str, str | None]:
+            try:
+                return catalog_product_id, self.get_catalog_product(catalog_product_id).get("quality_type")
+            except httpx.HTTPStatusError:
+                return catalog_product_id, None
+
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            for catalog_product_id, quality_type in pool.map(fetch_quality, unique_catalog_ids):
+                if quality_type:
+                    quality_type_by_catalog_id[catalog_product_id] = quality_type
+
+        return {
+            user_product_id: {
+                "catalog_product_id": catalog_product_id,
+                "quality_type": quality_type_by_catalog_id.get(catalog_product_id),
+            }
+            for user_product_id, catalog_product_id in catalog_id_by_user_product.items()
+        }
+
     def get_categories(self) -> Any:
         return self._get(f"/sites/{self.site_id}/categories")
 

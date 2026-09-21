@@ -1,7 +1,24 @@
-"""Listing quality report: buckets the seller's items by the score from
-Mercado Libre's `/item/{id}/performance` endpoint (0..100 -- the same number
-and "objectives" shown in the seller center's own quality widget; the older
-`health` item field is a different, deprecated metric and does not match it).
+"""Listing quality report.
+
+Two unrelated Mercado Libre metrics feed this, because a seller's listings
+split into two kinds that expose quality differently:
+
+- "Regular" listings (no `user_product_id`): `/item/{id}/performance`
+  returns the 0-100 score + pending objectives -- the same number shown in
+  the seller center's own quality widget. Verified against two real
+  listings (69 and 73) before trusting it; the older `health` item field is
+  a different, deprecated metric that does NOT match it (it returned 1 for
+  both).
+- Catalog-linked listings (`user_product_id` set): `/item/{id}/performance`
+  explicitly 400s ("Product items are not supported"), and
+  `/products/{catalog_product_id}/performance` 500s -- there is no
+  numeric score available from the public API for these. The closest public
+  signal is `quality_type` on `/products/{catalog_product_id}` (e.g.
+  "COMPLETE"), a coarse category shared by every seller listing that same
+  catalog product, resolved via `/user-products/{user_product_id}`.
+
+The two are reported as separate sections rather than forced into one
+number, since a 0-100 score and a two-value category aren't comparable.
 """
 
 from __future__ import annotations
@@ -24,7 +41,7 @@ BANDS = (
     ("critico", 0, 39, "Crítico", "#d03b3b"),
 )
 
-_ITEM_ATTRIBUTES = ["id", "title", "status", "permalink"]
+_ITEM_ATTRIBUTES = ["id", "title", "status", "permalink", "user_product_id"]
 
 
 def _band_for_score(score: int) -> str:
@@ -47,12 +64,26 @@ class QualityItem:
 
 
 @dataclass
+class CatalogQualityItem:
+    id: str
+    title: str
+    status: str
+    permalink: str
+    quality_type: str | None  # e.g. "COMPLETE"; None if it couldn't be resolved
+
+    @property
+    def is_complete(self) -> bool:
+        return self.quality_type == "COMPLETE"
+
+
+@dataclass
 class QualityReport:
     generated_at: str
     total: int
     skipped: int
     band_counts: dict[str, int]
     items: list[QualityItem] = field(default_factory=list)
+    catalog_items: list[CatalogQualityItem] = field(default_factory=list)
     skip_reasons: dict[int, int] = field(default_factory=dict)  # http_status -> count
     skip_samples: dict[int, str] = field(default_factory=dict)  # http_status -> example body
 
@@ -79,8 +110,15 @@ def fetch_quality_report(
     metadata_by_id = {
         raw["id"]: raw for raw in client.multiget_items(item_ids, attributes=_ITEM_ATTRIBUTES)
     }
+
+    # Catalog-linked listings (`user_product_id` set) don't have a numeric
+    # /performance score at all -- skip calling it for them and resolve their
+    # coarse `quality_type` instead, rather than burning API calls on 400s.
+    regular_ids = [i for i in item_ids if not metadata_by_id.get(i, {}).get("user_product_id")]
+    catalog_ids = [i for i in item_ids if metadata_by_id.get(i, {}).get("user_product_id")]
+
     performance_by_id, errors_by_id, skip_samples = client.get_items_performance(
-        item_ids, on_progress=on_progress
+        regular_ids, on_progress=on_progress
     )
     skip_reasons: dict[int, int] = {}
     for status_code in errors_by_id.values():
@@ -106,15 +144,35 @@ def fetch_quality_report(
                 pending_objectives=_pending_objectives(perf),
             )
         )
-
     items.sort(key=lambda item: item.score)
+
+    catalog_user_product_ids = [metadata_by_id[i]["user_product_id"] for i in catalog_ids]
+    catalog_quality = client.get_catalog_quality_by_user_product(catalog_user_product_ids)
+
+    catalog_items: list[CatalogQualityItem] = []
+    for item_id in catalog_ids:
+        meta = metadata_by_id[item_id]
+        resolved = catalog_quality.get(meta["user_product_id"], {})
+        catalog_items.append(
+            CatalogQualityItem(
+                id=item_id,
+                title=meta.get("title", ""),
+                status=meta.get("status", ""),
+                permalink=meta.get("permalink", ""),
+                quality_type=resolved.get("quality_type"),
+            )
+        )
+    catalog_items.sort(key=lambda i: i.is_complete)
+
+    resolved_count = len(items) + sum(1 for c in catalog_items if c.quality_type is not None)
 
     return QualityReport(
         generated_at=datetime.now(timezone.utc).isoformat(),
-        total=len(items),
-        skipped=len(item_ids) - len(items),
+        total=resolved_count,
+        skipped=len(item_ids) - resolved_count,
         band_counts=band_counts,
         items=items,
+        catalog_items=catalog_items,
         skip_reasons=skip_reasons,
         skip_samples=skip_samples,
     )
@@ -149,6 +207,17 @@ def _item_row(item: QualityItem, color_by_band: dict[str, str]) -> str:
         </tr>"""
 
 
+def _catalog_row(item: CatalogQualityItem) -> str:
+    title = _esc(item.title) or item.id
+    link = _esc(item.permalink) if item.permalink else "#"
+    quality_label = item.quality_type or "Sin dato"
+    return f"""
+        <tr>
+          <td><a href="{link}" target="_blank" rel="noopener">{title}</a></td>
+          <td>{_esc(quality_label)}</td>
+        </tr>"""
+
+
 def render_html(report: QualityReport, seller_label: str = "") -> str:
     color_by_band = {key: color for key, *_rest, color in BANDS}
     tiles = "".join(
@@ -174,6 +243,44 @@ def render_html(report: QualityReport, seller_label: str = "") -> str:
         <p class="muted">{table_note}</p>"""
     else:
         table_html = '<p class="muted">No hay publicaciones en banda Mejorable o Crítico. \U0001F389</p>'
+
+    catalog_section = ""
+    if report.catalog_items:
+        complete = sum(1 for c in report.catalog_items if c.is_complete)
+        incomplete = [c for c in report.catalog_items if not c.is_complete]
+        catalog_tiles = f"""
+        <div class="tiles">
+          <div class="tile">
+            <span class="tile-icon" style="background:#0ca30c" aria-hidden="true"></span>
+            <div class="tile-value">{complete}</div>
+            <div class="tile-label">Ficha completa</div>
+          </div>
+          <div class="tile">
+            <span class="tile-icon" style="background:#d03b3b" aria-hidden="true"></span>
+            <div class="tile-value">{len(incomplete)}</div>
+            <div class="tile-label">Ficha incompleta / sin dato</div>
+          </div>
+        </div>"""
+        if incomplete:
+            catalog_rows = "".join(_catalog_row(c) for c in incomplete[:200])
+            catalog_table = f"""
+        <table>
+          <thead>
+            <tr><th>Publicación</th><th>Ficha (quality_type)</th></tr>
+          </thead>
+          <tbody>{catalog_rows}
+          </tbody>
+        </table>
+        <p class="muted">Mostrando {min(len(incomplete), 200)} de {len(incomplete)}.
+        Estas publicaciones están vinculadas al catálogo de Mercado Libre: la ficha
+        de producto es compartida entre todos los vendedores de ese producto, por
+        lo que no tiene un score 0-100 propio como una publicación regular.</p>"""
+        else:
+            catalog_table = '<p class="muted">Todas tus publicaciones de catálogo tienen ficha completa. \U0001F389</p>'
+        catalog_section = f"""
+    <h2>Publicaciones de catálogo (Ficha)</h2>
+    {catalog_tiles}
+    {catalog_table}"""
 
     generated_local = report.generated_at.replace("T", " ").split(".")[0] + " UTC"
     skipped_note = f" · {report.skipped} sin datos de calidad" if report.skipped else ""
@@ -302,21 +409,31 @@ def render_html(report: QualityReport, seller_label: str = "") -> str:
     font-size: 13px;
   }}
   h2 {{
-    font-size: 16px;
+    font-size: 18px;
+    margin: 32px 0 12px;
+  }}
+  h2:first-of-type {{
+    margin-top: 0;
+  }}
+  h3 {{
+    font-size: 14px;
     margin: 0 0 12px;
+    color: var(--ink-secondary);
   }}
 </style>
 </head>
 <body>
   <div class="header">
     <h1>Calidad de publicaciones</h1>
-    <p>{subtitle} · {report.total} publicaciones{skipped_note} · generado {generated_local}</p>
+    <p>{subtitle} · {len(report.items)} regulares + {len(report.catalog_items)} de catálogo{skipped_note} · generado {generated_local}</p>
   </div>
   <div class="content">
+    <h2>Publicaciones regulares (score 0-100)</h2>
     <div class="tiles">{tiles}
     </div>
-    <h2>Publicaciones que necesitan atención</h2>
+    <h3>Publicaciones que necesitan atención</h3>
     {table_html}
+    {catalog_section}
   </div>
 </body>
 </html>

@@ -95,11 +95,22 @@ claude mcp add mercadolibre-mexico -- uv --directory /ruta/a/marketplaces run me
 - `meli_get_user(user_id)`
 
 **Calidad de publicaciones**
-- `meli_get_listing_quality_summary(status)` — resumen por bandas (Excelente
-  80-100 / Bueno 60-79 / Mejorable 40-59 / Crítico 0-39) según el `health`
-  score de Mercado Libre, más las publicaciones peor rankeadas.
-- `meli_generate_quality_dashboard(output_path, status)` — genera un reporte
-  HTML con esas mismas bandas y una tabla de publicaciones a mejorar.
+
+Mercado Libre mide la calidad distinto según el tipo de publicación, así que
+el reporte separa ambos:
+- **Publicaciones regulares**: usan `/item/{id}/performance` (score 0-100,
+  el mismo que ves en tu panel de vendedor), bucketed en Excelente 80-100 /
+  Bueno 60-79 / Mejorable 40-59 / Crítico 0-39, con los "objetivos
+  pendientes" de cada una.
+- **Publicaciones de catálogo** (con `user_product_id`, ficha compartida con
+  otros vendedores del mismo producto): no tienen score 0-100 público — se
+  reporta si su ficha está `COMPLETE` o no, vía `/products/{catalog_product_id}`.
+
+Tools:
+- `meli_get_listing_quality_summary(status)` — resumen de ambos tipos, con
+  las publicaciones que necesitan atención en cada uno.
+- `meli_generate_quality_dashboard(output_path, status)` — el mismo resumen
+  como página HTML con dos secciones.
 
 ## Dashboard de calidad sin Claude Code
 
