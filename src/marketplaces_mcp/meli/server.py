@@ -156,49 +156,37 @@ def meli_get_user(user_id: int | None = None) -> Any:
 
 @mcp.tool()
 def meli_get_listing_quality_summary(status: str | None = "active") -> Any:
-    """Summarize the seller's listing quality. Regular listings get a 0-100
-    score from Mercado Libre's `/item/{id}/performance` (the same number and
-    pending objectives shown in the seller center), bucketed into Excelente
-    (80-100) / Bueno (60-79) / Mejorable (40-59) / Crítico (0-39). Catalog-
-    linked listings (shared "Ficha" with other sellers of the same product)
-    only expose a coarse complete/incomplete `quality_type`, reported
-    separately since it isn't comparable to the 0-100 score.
+    """Summarize the seller's listing quality in one Excelente (80-100) /
+    Bueno (60-79) / Mejorable (40-59) / Crítico (0-39) classification across
+    every listing. Regular listings get a real 0-100 score from Mercado
+    Libre's `/item/{id}/performance` (the same number and pending objectives
+    shown in the seller center). Catalog-linked listings (shared "Ficha"
+    with other sellers of the same product) have no such score, so their
+    band comes from mapping their `quality_type` instead: COMPLETE ->
+    Excelente, anything else -> Crítico (each item's `kind` field says
+    which applies). Listings with no resolvable signal at all (mostly
+    non-active regular listings) are excluded and counted in `skipped`.
     status: active|paused|closed|None (all). Makes roughly one API call per
     listing, so it can take a while for sellers with many listings."""
     report = fetch_quality_report(get_client(), status=status)
     worst = [i for i in report.items if i.band in ("mejorable", "critico")][:50]
-    incomplete_catalog = [c for c in report.catalog_items if not c.is_complete][:50]
     return {
-        "regular_listings": {
-            "total": len(report.items),
-            "band_counts": report.band_counts,
-            "band_labels": {key: label for key, _low, _high, label, _color in BANDS},
-            "worst_items": [
-                {
-                    "id": i.id,
-                    "title": i.title,
-                    "score": i.score,
-                    "level": i.level,
-                    "band": i.band,
-                    "pending_objectives": i.pending_objectives,
-                    "permalink": i.permalink,
-                }
-                for i in worst
-            ],
-        },
-        "catalog_listings": {
-            "total": len(report.catalog_items),
-            "complete": sum(1 for c in report.catalog_items if c.is_complete),
-            "incomplete_items": [
-                {
-                    "id": c.id,
-                    "title": c.title,
-                    "quality_type": c.quality_type,
-                    "permalink": c.permalink,
-                }
-                for c in incomplete_catalog
-            ],
-        },
+        "total": report.total,
+        "band_counts": report.band_counts,
+        "band_labels": {key: label for key, _low, _high, label, _color in BANDS},
+        "worst_items": [
+            {
+                "id": i.id,
+                "title": i.title,
+                "kind": i.kind,
+                "score": i.score,
+                "level": i.level,
+                "band": i.band,
+                "pending_objectives": i.pending_objectives,
+                "permalink": i.permalink,
+            }
+            for i in worst
+        ],
         "skipped": report.skipped,
         "skip_reasons": report.skip_reasons,
         "generated_at": report.generated_at,
