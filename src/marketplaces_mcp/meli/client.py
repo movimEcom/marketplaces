@@ -80,33 +80,36 @@ class MeliClient:
 
     def get_items_performance(
         self, item_ids: list[str], max_workers: int = 8, on_progress: Callable[[int, int], None] | None = None
-    ) -> tuple[dict[str, Any], dict[str, int]]:
+    ) -> tuple[dict[str, Any], dict[str, int], dict[int, str]]:
         """Fetch `/item/{id}/performance` for many items concurrently (there
         is no multiget for this endpoint, unlike the rest of the Items API).
-        Returns ({item_id: performance_body}, {item_id: http_status}) --
-        the second dict holds only the ids that errored, so callers can see
-        *why* an id was skipped instead of it disappearing silently.
+        Returns ({item_id: performance_body}, {item_id: http_status},
+        {http_status: sample_response_body}) -- the last dict keeps one
+        example response body per distinct error status, so callers can see
+        *why* ids were skipped instead of them disappearing silently.
         """
         results: dict[str, Any] = {}
         errors: dict[str, int] = {}
+        samples: dict[int, str] = {}
         done = 0
 
-        def fetch(item_id: str) -> tuple[str, Any | None, int | None]:
+        def fetch(item_id: str) -> tuple[str, Any | None, int | None, str | None]:
             try:
-                return item_id, self.get_item_performance(item_id), None
+                return item_id, self.get_item_performance(item_id), None, None
             except httpx.HTTPStatusError as exc:
-                return item_id, None, exc.response.status_code
+                return item_id, None, exc.response.status_code, exc.response.text
 
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            for item_id, perf, error_status in pool.map(fetch, item_ids):
+            for item_id, perf, error_status, error_body in pool.map(fetch, item_ids):
                 done += 1
                 if perf is not None:
                     results[item_id] = perf
                 else:
                     errors[item_id] = error_status
+                    samples.setdefault(error_status, error_body)
                 if on_progress:
                     on_progress(done, len(item_ids))
-        return results, errors
+        return results, errors, samples
 
     def get_categories(self) -> Any:
         return self._get(f"/sites/{self.site_id}/categories")

@@ -48,6 +48,9 @@ def main() -> None:
         print("\nMotivo de las omitidas (código HTTP de /item/{id}/performance):")
         for status_code, count in sorted(report.skip_reasons.items()):
             print(f"  {status_code}: {count}")
+            sample = report.skip_samples.get(status_code)
+            if sample:
+                print(f"    ejemplo de respuesta: {sample[:500]}")
     print(f"\nReporte guardado en: {path.resolve()}")
 
     if "--open" in flags:
