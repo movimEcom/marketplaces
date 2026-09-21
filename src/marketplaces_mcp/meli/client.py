@@ -69,6 +69,11 @@ class MeliClient:
     def get_item(self, item_id: str) -> Any:
         return self._get(f"/items/{item_id}")
 
+    def get_item_performance(self, item_id: str) -> Any:
+        """The `health` item field is deprecated; this is Mercado Libre's
+        replacement for listing-quality score + met/pending objectives."""
+        return self._get(f"/items/{item_id}/performance")
+
     def get_categories(self) -> Any:
         return self._get(f"/sites/{self.site_id}/categories")
 
