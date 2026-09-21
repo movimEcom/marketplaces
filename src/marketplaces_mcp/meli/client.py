@@ -128,25 +128,29 @@ class MeliClient:
         self, user_product_ids: list[str], max_workers: int = 8
     ) -> dict[str, Any]:
         """For each user_product id, resolve its catalog product and return
-        {user_product_id: {"catalog_product_id":..., "quality_type":...}}.
-        Catalog products are deduplicated so each is only fetched once even
-        if many of the seller's listings share it (e.g. color/size variants).
-        Ids that fail at either step are skipped.
+        {user_product_id: {"catalog_product_id":..., "quality_type":...,
+        "attributes":..., "pictures":...}} -- the last two (from the
+        user_product body itself) are there so callers can build their own
+        ficha-completeness estimate, since Mercado Libre doesn't expose a
+        0-100 score for catalog-linked listings. Catalog products are
+        deduplicated so each is only fetched once even if many of the
+        seller's listings share it (e.g. color/size variants). Ids that fail
+        at either step are skipped.
         """
-        catalog_id_by_user_product: dict[str, str] = {}
+        user_product_by_id: dict[str, Any] = {}
 
-        def resolve(user_product_id: str) -> tuple[str, str | None]:
+        def resolve(user_product_id: str) -> tuple[str, Any | None]:
             try:
-                return user_product_id, self.get_user_product(user_product_id).get("catalog_product_id")
+                return user_product_id, self.get_user_product(user_product_id)
             except httpx.HTTPStatusError:
                 return user_product_id, None
 
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            for user_product_id, catalog_product_id in pool.map(resolve, user_product_ids):
-                if catalog_product_id:
-                    catalog_id_by_user_product[user_product_id] = catalog_product_id
+            for user_product_id, user_product in pool.map(resolve, user_product_ids):
+                if user_product and user_product.get("catalog_product_id"):
+                    user_product_by_id[user_product_id] = user_product
 
-        unique_catalog_ids = sorted(set(catalog_id_by_user_product.values()))
+        unique_catalog_ids = sorted({up["catalog_product_id"] for up in user_product_by_id.values()})
         quality_type_by_catalog_id: dict[str, str] = {}
 
         def fetch_quality(catalog_product_id: str) -> tuple[str, str | None]:
@@ -162,10 +166,12 @@ class MeliClient:
 
         return {
             user_product_id: {
-                "catalog_product_id": catalog_product_id,
-                "quality_type": quality_type_by_catalog_id.get(catalog_product_id),
+                "catalog_product_id": user_product["catalog_product_id"],
+                "quality_type": quality_type_by_catalog_id.get(user_product["catalog_product_id"]),
+                "attributes": user_product.get("attributes", []),
+                "pictures": user_product.get("pictures", []),
             }
-            for user_product_id, catalog_product_id in catalog_id_by_user_product.items()
+            for user_product_id, user_product in user_product_by_id.items()
         }
 
     def get_categories(self) -> Any:

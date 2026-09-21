@@ -14,14 +14,19 @@ onto the same 4-band scale takes two different real signals:
 - Catalog-linked listings (`user_product_id` set): `/item/{id}/performance`
   explicitly 400s ("Product items are not supported"), and both
   `/products/{catalog_product_id}/performance` and
-  `/user-products/{id}/performance` 500 -- there is no numeric score
-  available from the public API for these. The closest public signal is
-  `quality_type` on `/products/{catalog_product_id}` (e.g. "COMPLETE"), a
-  coarse category shared by every seller listing that same catalog product,
-  resolved via `/user-products/{user_product_id}`. Mapped onto the same
-  scale as: COMPLETE -> Excelente, anything else -> Crítico.
+  `/user-products/{id}/performance` 500 -- Mercado Libre does not expose a
+  0-100 score for these at all. The only public signal is `quality_type` on
+  `/products/{catalog_product_id}` (e.g. "COMPLETE"), a coarse category
+  shared by every seller listing that same catalog product. To still place
+  these on the same 0-100 scale (at the user's request), we compute our own
+  ESTIMATED score from the user_product's ficha completeness: % of
+  attributes filled + how many pictures it has. This is our own heuristic,
+  not a Mercado Libre number -- every such item is flagged
+  `is_estimated=True` and labeled "(estimado)" wherever it's shown, and its
+  `quality_type` floors the estimate at 80 when Mercado Libre itself already
+  calls the ficha COMPLETE.
 
-Listings with no resolvable signal either way (mostly non-active regular
+Listings with no resolvable signal at all (mostly non-active regular
 listings, since Mercado Libre doesn't compute quality for those) are kept
 out of the bands rather than guessed at, and reported as `skipped`.
 """
@@ -64,16 +69,39 @@ class QualityItem:
     permalink: str
     band: str
     kind: str  # "regular" | "catalog"
-    score: int | None = None  # None for catalog items -- no real 0-100 exists
+    score: int | None = None
+    is_estimated: bool = False  # True for catalog items -- score is our own heuristic
     level: str = ""
     pending_objectives: list[str] = field(default_factory=list)
 
     @property
     def sort_score(self) -> int:
-        """For ordering only -- never displayed for catalog items."""
-        if self.score is not None:
-            return self.score
-        return 100 if self.band == "excelente" else -1
+        return self.score if self.score is not None else -1
+
+
+def _estimate_catalog_score(attributes: list[dict], pictures: list, quality_type: str | None) -> int:
+    """Our own 0-100 ficha-completeness heuristic for catalog-linked
+    listings, since Mercado Libre exposes no numeric score for them: 70%
+    weight on the share of attributes that have a real value (Mercado Libre
+    returns unset ones as a placeholder like {"id": "-1", "name": None}),
+    30% weight on picture count (capped at 5, a common "enough photos"
+    baseline). Floored at 80 when Mercado Libre's own `quality_type` already
+    says the ficha is COMPLETE, so the estimate doesn't contradict the one
+    real signal we do have.
+    """
+    total = len(attributes)
+    filled = sum(
+        1
+        for attr in attributes
+        if any(v.get("name") not in (None, "") or v.get("id") not in (None, "-1") for v in attr.get("values", []))
+    )
+    attribute_ratio = (filled / total) if total else 0.0
+    picture_ratio = min(len(pictures) / 5, 1.0)
+
+    score = round(100 * (0.7 * attribute_ratio + 0.3 * picture_ratio))
+    if quality_type == "COMPLETE":
+        score = max(score, 80)
+    return max(0, min(100, score))
 
 
 @dataclass
@@ -151,13 +179,17 @@ def fetch_quality_report(
     catalog_resolved = 0
     for item_id in catalog_ids:
         meta = metadata_by_id[item_id]
-        quality_type = catalog_quality.get(meta["user_product_id"], {}).get("quality_type")
-        if quality_type is None:
+        resolved = catalog_quality.get(meta["user_product_id"])
+        if resolved is None:
             continue  # no signal at all -- goes to `skipped`, not guessed
         catalog_resolved += 1
-        is_complete = quality_type == "COMPLETE"
-        band = "excelente" if is_complete else "critico"
+        quality_type = resolved.get("quality_type")
+        score = _estimate_catalog_score(resolved.get("attributes", []), resolved.get("pictures", []), quality_type)
+        band = _band_for_score(score)
         band_counts[band] += 1
+        objectives = [] if band == "excelente" else ["Completa la ficha del producto (más atributos y fotos)"]
+        if quality_type and quality_type != "COMPLETE":
+            objectives.append(f"Mercado Libre marca la ficha como: {quality_type}")
         items.append(
             QualityItem(
                 id=item_id,
@@ -166,7 +198,9 @@ def fetch_quality_report(
                 permalink=meta.get("permalink", ""),
                 band=band,
                 kind="catalog",
-                pending_objectives=[] if is_complete else [f"Ficha incompleta ({quality_type})"],
+                score=score,
+                is_estimated=True,
+                pending_objectives=objectives,
             )
         )
 
@@ -205,6 +239,8 @@ def _item_row(item: QualityItem, color_by_band: dict[str, str]) -> str:
     link = _esc(item.permalink) if item.permalink else "#"
     objectives = ", ".join(item.pending_objectives) or "—"
     score_display = str(item.score) if item.score is not None else "—"
+    if item.is_estimated:
+        score_display += " (estimado)"
     kind_label = "Regular" if item.kind == "regular" else "Catálogo"
     return f"""
         <tr>
@@ -229,8 +265,10 @@ def render_html(report: QualityReport, seller_label: str = "") -> str:
         table_note = (
             f"Mostrando {min(len(attention_items), 300)} de {len(attention_items)} "
             "publicaciones en banda Mejorable o Crítico, ordenadas de menor a mayor score. "
-            "Las de catálogo no tienen un score propio (la ficha es compartida entre "
-            "vendedores) -- su banda sale de si la ficha está completa o no."
+            "Los scores marcados \"(estimado)\" son de publicaciones de catálogo: Mercado "
+            "Libre no expone un score 0-100 para esas (la ficha es compartida entre "
+            "vendedores), así que lo calculamos nosotros a partir de qué tan completa "
+            "está la ficha -- no es el dato oficial de Mercado Libre."
         )
         table_html = f"""
         <table>

@@ -160,11 +160,13 @@ def meli_get_listing_quality_summary(status: str | None = "active") -> Any:
     Bueno (60-79) / Mejorable (40-59) / Crítico (0-39) classification across
     every listing. Regular listings get a real 0-100 score from Mercado
     Libre's `/item/{id}/performance` (the same number and pending objectives
-    shown in the seller center). Catalog-linked listings (shared "Ficha"
-    with other sellers of the same product) have no such score, so their
-    band comes from mapping their `quality_type` instead: COMPLETE ->
-    Excelente, anything else -> Crítico (each item's `kind` field says
-    which applies). Listings with no resolvable signal at all (mostly
+    shown in the seller center). Mercado Libre exposes no such score for
+    catalog-linked listings (shared "Ficha" with other sellers of the same
+    product) -- only a coarse complete/incomplete `quality_type` -- so those
+    get our own ESTIMATED 0-100 score instead, from how complete their
+    attributes/pictures are (`is_estimated=True`, `kind="catalog"`; a
+    regular item has `is_estimated=False`, `kind="regular"` and its score is
+    Mercado Libre's own). Listings with no resolvable signal at all (mostly
     non-active regular listings) are excluded and counted in `skipped`.
     status: active|paused|closed|None (all). Makes roughly one API call per
     listing, so it can take a while for sellers with many listings."""
@@ -180,6 +182,7 @@ def meli_get_listing_quality_summary(status: str | None = "active") -> Any:
                 "title": i.title,
                 "kind": i.kind,
                 "score": i.score,
+                "is_estimated": i.is_estimated,
                 "level": i.level,
                 "band": i.band,
                 "pending_objectives": i.pending_objectives,

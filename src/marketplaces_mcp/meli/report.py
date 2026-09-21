@@ -44,9 +44,12 @@ def main() -> None:
     regular_count = sum(1 for i in report.items if i.kind == "regular")
     catalog_count = sum(1 for i in report.items if i.kind == "catalog")
     print(f"\n{report.total} publicaciones clasificadas "
-          f"({regular_count} regulares con score, {catalog_count} de catálogo por ficha):")
+          f"({regular_count} regulares con score real, {catalog_count} de catálogo con score estimado):")
     for key, _low, _high, label, _color in BANDS:
         print(f"  {label}: {report.band_counts.get(key, 0)}")
+    if catalog_count:
+        print("  (el score de catálogo es nuestra estimación por completitud de ficha, "
+              "no un dato oficial de Mercado Libre)")
     if report.skipped:
         print(f"\n{report.skipped} publicaciones omitidas (sin datos de calidad resolubles).")
     if report.skip_reasons:
