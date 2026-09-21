@@ -80,29 +80,33 @@ class MeliClient:
 
     def get_items_performance(
         self, item_ids: list[str], max_workers: int = 8, on_progress: Callable[[int, int], None] | None = None
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], dict[str, int]]:
         """Fetch `/item/{id}/performance` for many items concurrently (there
         is no multiget for this endpoint, unlike the rest of the Items API).
-        Returns {item_id: performance_body}; ids that error (e.g. closed
-        listings with no performance data) are silently skipped.
+        Returns ({item_id: performance_body}, {item_id: http_status}) --
+        the second dict holds only the ids that errored, so callers can see
+        *why* an id was skipped instead of it disappearing silently.
         """
         results: dict[str, Any] = {}
+        errors: dict[str, int] = {}
         done = 0
 
-        def fetch(item_id: str) -> tuple[str, Any | None]:
+        def fetch(item_id: str) -> tuple[str, Any | None, int | None]:
             try:
-                return item_id, self.get_item_performance(item_id)
-            except httpx.HTTPStatusError:
-                return item_id, None
+                return item_id, self.get_item_performance(item_id), None
+            except httpx.HTTPStatusError as exc:
+                return item_id, None, exc.response.status_code
 
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            for item_id, perf in pool.map(fetch, item_ids):
+            for item_id, perf, error_status in pool.map(fetch, item_ids):
                 done += 1
                 if perf is not None:
                     results[item_id] = perf
+                else:
+                    errors[item_id] = error_status
                 if on_progress:
                     on_progress(done, len(item_ids))
-        return results
+        return results, errors
 
     def get_categories(self) -> Any:
         return self._get(f"/sites/{self.site_id}/categories")

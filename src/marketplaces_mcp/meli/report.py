@@ -41,9 +41,13 @@ def main() -> None:
     html = render_html(report, seller_label=f"vendedor {client.user_id}")
     path = save_report(html, output_path)
 
-    print(f"\n{report.total} publicaciones analizadas" + (f" ({report.skipped} sin datos de calidad, omitidas)" if report.skipped else "") + ":")
+    print(f"\n{report.total} publicaciones analizadas" + (f" ({report.skipped} omitidas)" if report.skipped else "") + ":")
     for key, _low, _high, label, _color in BANDS:
         print(f"  {label}: {report.band_counts.get(key, 0)}")
+    if report.skip_reasons:
+        print("\nMotivo de las omitidas (código HTTP de /item/{id}/performance):")
+        for status_code, count in sorted(report.skip_reasons.items()):
+            print(f"  {status_code}: {count}")
     print(f"\nReporte guardado en: {path.resolve()}")
 
     if "--open" in flags:

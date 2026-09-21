@@ -53,6 +53,7 @@ class QualityReport:
     skipped: int
     band_counts: dict[str, int]
     items: list[QualityItem] = field(default_factory=list)
+    skip_reasons: dict[int, int] = field(default_factory=dict)  # http_status -> count
 
     def items_in_band(self, band: str) -> list[QualityItem]:
         return [item for item in self.items if item.band == band]
@@ -77,7 +78,10 @@ def fetch_quality_report(
     metadata_by_id = {
         raw["id"]: raw for raw in client.multiget_items(item_ids, attributes=_ITEM_ATTRIBUTES)
     }
-    performance_by_id = client.get_items_performance(item_ids, on_progress=on_progress)
+    performance_by_id, errors_by_id = client.get_items_performance(item_ids, on_progress=on_progress)
+    skip_reasons: dict[int, int] = {}
+    for status_code in errors_by_id.values():
+        skip_reasons[status_code] = skip_reasons.get(status_code, 0) + 1
 
     items: list[QualityItem] = []
     band_counts = {key: 0 for key, *_ in BANDS}
@@ -108,6 +112,7 @@ def fetch_quality_report(
         skipped=len(item_ids) - len(items),
         band_counts=band_counts,
         items=items,
+        skip_reasons=skip_reasons,
     )
 
 

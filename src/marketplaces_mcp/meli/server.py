@@ -167,6 +167,7 @@ def meli_get_listing_quality_summary(status: str | None = "active") -> Any:
     return {
         "total": report.total,
         "skipped": report.skipped,
+        "skip_reasons": report.skip_reasons,
         "band_counts": report.band_counts,
         "band_labels": {key: label for key, _low, _high, label, _color in BANDS},
         "generated_at": report.generated_at,
