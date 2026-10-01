@@ -2,7 +2,8 @@
 
 Servidores MCP (Model Context Protocol) para conectar agentes de IA a APIs de
 marketplaces. Actualmente incluye un servidor completo de **operaciones de
-vendedor en Mercado Libre México (sitio `MLM`)**.
+vendedor en Mercado Libre México (sitio `MLM`)** y un conector de solo
+lectura a **Alpha ERP** (ver [Alpha ERP](#alpha-erp-solo-lectura)).
 
 ## 1. Crear la aplicación en Mercado Libre
 
@@ -127,6 +128,61 @@ Es un snapshot bajo demanda: cada corrida vuelve a consultar Mercado Libre y
 regenera el archivo con los datos actuales (no guarda histórico entre
 corridas).
 
+## Alpha ERP (solo lectura)
+
+Alpha ERP (Castelec) no usa SQL Server: guarda sus datos en archivos **.DBF**
+(xBase/FoxPro) dentro de una carpeta del servidor. Este conector lee esos
+archivos directamente, **solo en modo lectura** (nunca escribe ni bloquea las
+tablas), así que puede correr mientras Alpha está en uso.
+
+### ¿Dónde correrlo si hoy entras por Remote Desktop?
+
+El conector necesita ver la carpeta de datos de Alpha como archivos. Elige una:
+
+1. **En el mismo servidor (lo más simple).** Desde tu sesión de Remote Desktop
+   instala `uv` y este repo en el servidor y apunta `ALPHA_DATA_DIR` a la ruta
+   local, p. ej. `C:\Alpha\Datos`. El cliente MCP (Claude Desktop / Claude
+   Code) también corre ahí.
+2. **Desde tu PC por carpeta compartida.** Si tu PC está en la misma red (o
+   VPN) que el servidor, comparte la carpeta de datos en Windows (clic derecho →
+   Propiedades → Compartir, con permiso de **solo lectura**) y usa
+   `ALPHA_DATA_DIR=\\SERVIDOR\Alpha\Datos` (en Mac/Linux, móntala primero con
+   SMB y usa la ruta del montaje).
+3. **Desde fuera de la oficina.** No abras el puerto SMB (445) a internet. Usa
+   una VPN (p. ej. Tailscale o la VPN del firewall) y luego la opción 2.
+
+Para encontrar la carpeta de datos: en el servidor busca dónde están los
+archivos `.DBF` (suele haber una subcarpeta por empresa). El conector las
+recorre todas y nombra cada tabla por su ruta relativa, p. ej.
+`emp01/clientes`.
+
+### Configurar y probar
+
+```bash
+# en .env
+ALPHA_DATA_DIR=C:\Alpha\Datos
+
+uv sync
+uv run alpha-erp-check            # lista las tablas que encuentra
+uv run alpha-erp-check clientes   # además muestra campos y 3 registros
+```
+
+Si ves acentos o `ñ` mal, prueba `ALPHA_DBF_ENCODING=cp850` (o `cp1252`).
+
+### Registrar el servidor MCP
+
+```bash
+claude mcp add alpha-erp -- uv --directory /ruta/a/marketplaces run alpha-erp-mcp
+```
+
+Tools:
+- `alpha_list_tables(name_contains, refresh)` — tablas .DBF con tamaño y fecha.
+- `alpha_describe_table(table)` — campos, tipos y número de registros.
+- `alpha_query_table(table, fields, equals, contains, limit, offset)` — lee
+  filas con filtros simples y paginación.
+- `alpha_search(text, table_contains, limit)` — busca un texto (cliente, SKU,
+  RFC, folio) en todas las tablas; útil para descubrir el esquema.
+
 ## Estructura
 
 ```
@@ -138,6 +194,12 @@ src/marketplaces_mcp/meli/
   quality.py    # cálculo de bandas de calidad + render del HTML del dashboard
   report.py     # CLI standalone del dashboard (meli-mx-quality-report)
   server.py     # servidor MCP (FastMCP) que expone las tools (meli-mx-mcp)
+
+src/marketplaces_mcp/alpha/
+  config.py     # ALPHA_DATA_DIR, encoding, límite de filas
+  dbf.py        # lectura (solo lectura) de las tablas .DBF de Alpha ERP
+  check.py      # prueba de conexión (alpha-erp-check)
+  server.py     # servidor MCP con las tools alpha_* (alpha-erp-mcp)
 ```
 
 ## Notas de seguridad
