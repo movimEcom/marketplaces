@@ -12,6 +12,7 @@ from mcp.server.mcpserver import MCPServer
 from .client import MeliClient
 from .config import load_settings
 from .quality import BANDS, fetch_quality_report, render_html, save_report
+from .sales_summary import fetch_sales_summary
 
 mcp = MCPServer("mercadolibre-mexico")
 
@@ -208,6 +209,34 @@ def meli_generate_quality_dashboard(
     html = render_html(report, seller_label=f"vendedor {get_client().user_id}")
     path = save_report(html, output_path)
     return str(path.resolve())
+
+
+@mcp.tool()
+def meli_get_sales_summary(days: int = 30, status: str = "paid") -> Any:
+    """Estimate ticket promedio (average order value) and facturación
+    (revenue) for the last `days` days from real orders, plus a % breakdown
+    by payment method bucket (débito/crédito/AMEX/cuenta/transferencia -- Mercado
+    Libre doesn't flag national vs. international card in the order, so that
+    split isn't available here) and by number of MSI installments. Does NOT
+    include payment-method fees/surcharges or fund-release days: those are
+    commercial account settings, not order data, and must come from the
+    Mercado Pago seller panel."""
+    summary = fetch_sales_summary(get_client(), days=days, status=status)
+    return {
+        "date_from": summary.date_from,
+        "date_to": summary.date_to,
+        "order_count": summary.order_count,
+        "currency": summary.currency,
+        "average_ticket": summary.average_ticket,
+        "total_amount": summary.total_amount,
+        "average_monthly_revenue": summary.average_monthly_revenue,
+        "monthly_totals": summary.monthly_totals,
+        "payment_amount_by_bucket": summary.payment_amount_by_bucket,
+        "payment_count_by_bucket": summary.payment_count_by_bucket,
+        "installments_amount": summary.installments_amount,
+        "installments_count": summary.installments_count,
+        "truncated": summary.truncated,
+    }
 
 
 def main() -> None:

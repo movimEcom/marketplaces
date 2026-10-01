@@ -247,11 +247,20 @@ class MeliClient:
     # -- seller: orders -----------------------------------------------------
 
     def list_orders(
-        self, status: str | None = None, limit: int = 50, offset: int = 0
+        self,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        date_from: str | None = None,
+        date_to: str | None = None,
     ) -> Any:
         params: dict[str, Any] = {"seller": self.user_id, "limit": limit, "offset": offset}
         if status:
             params["order.status"] = status
+        if date_from:
+            params["order.date_created.from"] = date_from
+        if date_to:
+            params["order.date_created.to"] = date_to
         return self._get("/orders/search", params=params)
 
     def get_order(self, order_id: str) -> Any:
