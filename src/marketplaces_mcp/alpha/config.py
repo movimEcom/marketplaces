@@ -17,6 +17,8 @@ class Settings:
     # None lets dbfread pick the code page from each DBF header (language driver byte).
     encoding: str | None
     max_rows: int
+    # Subfolder levels below data_dir to look for .DBF files (0 = only data_dir itself).
+    scan_depth: int
 
 
 def load_settings() -> Settings:
@@ -36,5 +38,6 @@ def load_settings() -> Settings:
 
     encoding = os.environ.get("ALPHA_DBF_ENCODING", "").strip() or None
     max_rows = int(os.environ.get("ALPHA_MAX_ROWS", "500"))
+    scan_depth = int(os.environ.get("ALPHA_SCAN_DEPTH", "1"))
 
-    return Settings(data_dir=data_dir, encoding=encoding, max_rows=max_rows)
+    return Settings(data_dir=data_dir, encoding=encoding, max_rows=max_rows, scan_depth=scan_depth)

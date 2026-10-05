@@ -8,6 +8,7 @@ corrupt the ERP's data or indexes while Alpha is running.
 from __future__ import annotations
 
 import datetime as dt
+import os
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -49,6 +50,23 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
+def _scan_dbf(folder: Path, depth: int) -> Iterator[os.DirEntry]:
+    """Yield .DBF entries in `folder` and up to `depth` levels of subfolders.
+    Bounded on purpose: company folders can hold thousands of CFDI XML/PDF files
+    in deep subfolders, and walking all of them over a VPN takes minutes."""
+    try:
+        entries = list(os.scandir(folder))
+    except OSError:
+        return
+    for entry in entries:
+        if entry.is_file() and entry.name.lower().endswith(".dbf"):
+            yield entry
+    if depth > 0:
+        for entry in entries:
+            if entry.is_dir():
+                yield from _scan_dbf(Path(entry.path), depth - 1)
+
+
 class AlphaData:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -62,11 +80,12 @@ class AlphaData:
         if self._tables is None or refresh:
             root = self.settings.data_dir
             found: dict[str, TableInfo] = {}
-            for path in root.rglob("*"):
-                if path.suffix.lower() != ".dbf" or not path.is_file():
-                    continue
+            for entry in _scan_dbf(root, self.settings.scan_depth):
+                path = Path(entry.path)
                 name = path.relative_to(root).with_suffix("").as_posix().lower()
-                stat = path.stat()
+                # On Windows DirEntry.stat() comes from the directory listing itself,
+                # so this costs no extra round trip over a network share/VPN.
+                stat = entry.stat()
                 found[name] = TableInfo(
                     name=name,
                     path=path,

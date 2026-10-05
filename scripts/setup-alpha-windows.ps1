@@ -42,8 +42,6 @@ if ($DataDir -match '^([A-Za-z]):\\?(.*)$') {
 if (-not (Test-Path $resolved)) {
     throw "No encuentro $resolved. Abre esa carpeta en el Explorador para confirmar que tienes acceso."
 }
-$dbfCount = (Get-ChildItem $resolved -Recurse -Filter *.dbf -ErrorAction SilentlyContinue | Measure-Object).Count
-Write-Host "$dbfCount archivos .DBF en $resolved"
 
 # 3. .env + prueba
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
@@ -52,6 +50,7 @@ $lines += "ALPHA_DATA_DIR=$resolved"
 [IO.File]::WriteAllLines((Join-Path $repo ".env"), [string[]]$lines, $utf8)
 
 & $uv sync
+Write-Host "Buscando tablas .DBF en $resolved (por la VPN puede tardar un poco)..."
 & $uv run alpha-erp-check
 if ($LASTEXITCODE -ne 0) { throw "alpha-erp-check falló; revisa la salida de arriba." }
 

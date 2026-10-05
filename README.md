@@ -183,6 +183,9 @@ uv run alpha-erp-check clientes   # además muestra campos y 3 registros
 ```
 
 Si ves acentos o `ñ` mal, prueba `ALPHA_DBF_ENCODING=cp850` (o `cp1252`).
+Solo se buscan `.DBF` en la carpeta y un nivel de subcarpetas
+(`ALPHA_SCAN_DEPTH=1`), para no recorrer miles de XML/PDF por la VPN; súbelo
+si faltan tablas.
 
 ### Registrar el servidor MCP
 
