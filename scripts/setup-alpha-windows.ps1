@@ -57,10 +57,17 @@ if (-not (Test-Path $resolved)) {
 }
 
 # 3. .env + prueba
-if (-not (Test-Path .env)) { Copy-Item .env.example .env }
-$lines = @(Get-Content .env | Where-Object { $_ -notmatch '^ALPHA_DATA_DIR=' })
-$lines += "ALPHA_DATA_DIR=$resolved"
-Write-Utf8File (Join-Path $repo ".env") (($lines -join "`r`n") + "`r`n")
+# La ruta va por variable de entorno (a la prueba y a Claude Desktop), que tiene
+# prioridad sobre .env; guardarla en .env es solo comodidad para correr a mano.
+$env:ALPHA_DATA_DIR = $resolved
+try {
+    if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+    $lines = @(Get-Content .env | Where-Object { $_ -notmatch '^ALPHA_DATA_DIR=' })
+    $lines += "ALPHA_DATA_DIR=$resolved"
+    Write-Utf8File (Join-Path $repo ".env") (($lines -join "`r`n") + "`r`n")
+} catch {
+    Write-Warning "No pude guardar la ruta en .env ($($_.Exception.Message)). Sigo sin él: no es necesario para Claude Desktop."
+}
 
 Write-Host "[3/4] Instalando dependencias (uv sync)..."
 & $uv sync
