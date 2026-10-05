@@ -106,12 +106,14 @@ def alpha_ecommerce_sales(
     date_to: str | None = None,
     top_products: int = 20,
 ) -> Any:
-    """Fixed ecommerce sales report: totals per channel (Mercado Libre, Amazon,
-    Walmart...), per day and top products, for a month ('2026-09') or a
-    date_from/date_to range (YYYY-MM-DD). Table, fields and which values
-    identify each channel come from config/alpha_ecommerce_sales.json, so
-    every period uses the same criteria -- prefer this over ad-hoc
-    alpha_aggregate calls for ecommerce sales."""
+    """Fixed ecommerce sales report for a month ('2026-09') or a
+    date_from/date_to range (YYYY-MM-DD): gross, returns and net (without IVA,
+    plus net_with_iva) in total, per channel (Mercado Libre, Amazon, Tienda en
+    línea, Otros en línea), per day and top products. Table, fields, channel
+    codes and how returns are matched to their sale come from
+    config/alpha_ecommerce_sales.json, so every period uses the same criteria
+    -- prefer this over ad-hoc alpha_aggregate calls for ecommerce sales.
+    Mention unmatched_returns to the user when it is not zero."""
     if month:
         date_from, date_to = month_range(month)
     if not date_from or not date_to:
