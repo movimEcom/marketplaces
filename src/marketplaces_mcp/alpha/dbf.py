@@ -151,23 +151,17 @@ class AlphaData:
         for record in self._open(info):
             yield {k: _jsonable(v) for k, v in record.items()}
 
-    def query(
-        self,
-        table: str,
-        fields: list[str] | None = None,
-        equals: dict[str, Any] | None = None,
-        contains: dict[str, str] | None = None,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> dict[str, Any]:
-        """Scan a table, keeping rows where every `equals` field matches exactly
-        (strings compared trimmed and case-insensitive) and every `contains` field
-        includes the given text (case-insensitive)."""
-        info = self._resolve(table)
-        limit = max(1, min(limit, self.settings.max_rows))
+    @staticmethod
+    def _make_filter(
+        equals: dict[str, Any] | None,
+        contains: dict[str, str] | None,
+        date_field: str | None,
+        date_from: str | None,
+        date_to: str | None,
+    ):
         equals = {k.upper(): v for k, v in (equals or {}).items()}
         contains = {k.upper(): str(v).lower() for k, v in (contains or {}).items()}
-        wanted = [f.upper() for f in fields] if fields else None
+        date_key = date_field.upper() if date_field else None
 
         def matches(row: dict[str, Any]) -> bool:
             for key, expected in equals.items():
@@ -180,7 +174,38 @@ class AlphaData:
             for key, needle in contains.items():
                 if needle not in str(row.get(key, "")).lower():
                     return False
+            if date_key:
+                # Dates come out as ISO strings, so the YYYY-MM-DD prefix compares in order.
+                value = row.get(date_key)
+                if not isinstance(value, str) or len(value) < 10:
+                    return False
+                day = value[:10]
+                if (date_from and day < date_from) or (date_to and day > date_to):
+                    return False
             return True
+
+        return matches
+
+    def query(
+        self,
+        table: str,
+        fields: list[str] | None = None,
+        equals: dict[str, Any] | None = None,
+        contains: dict[str, str] | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        date_field: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> dict[str, Any]:
+        """Scan a table, keeping rows where every `equals` field matches exactly
+        (strings compared trimmed and case-insensitive), every `contains` field
+        includes the given text (case-insensitive) and, if `date_field` is given,
+        its date falls within date_from..date_to (YYYY-MM-DD, inclusive)."""
+        info = self._resolve(table)
+        limit = max(1, min(limit, self.settings.max_rows))
+        matches = self._make_filter(equals, contains, date_field, date_from, date_to)
+        wanted = [f.upper() for f in fields] if fields else None
 
         rows: list[dict[str, Any]] = []
         matched = 0
@@ -195,6 +220,62 @@ class AlphaData:
                 return {"table": info.name, "rows": rows, "has_more": True}
             rows.append({k: row.get(k) for k in wanted} if wanted else row)
         return {"table": info.name, "rows": rows, "has_more": False}
+
+    def aggregate(
+        self,
+        table: str,
+        group_by: list[str] | None = None,
+        sum_fields: list[str] | None = None,
+        equals: dict[str, Any] | None = None,
+        contains: dict[str, str] | None = None,
+        date_field: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        max_groups: int = 200,
+    ) -> dict[str, Any]:
+        """Count matching rows and total `sum_fields`, per combination of
+        `group_by` values. The whole table is scanned here, so only the totals
+        cross the VPN/MCP boundary -- the way to answer "sales in September by
+        channel" over a 50 MB table. With no sum_fields it's a value count,
+        handy to discover which codes a field uses."""
+        info = self._resolve(table)
+        matches = self._make_filter(equals, contains, date_field, date_from, date_to)
+        keys = [f.upper() for f in group_by or []]
+        sums = [f.upper() for f in sum_fields or []]
+
+        groups: dict[tuple, dict[str, Any]] = {}
+        totals = {"count": 0, **{f: 0.0 for f in sums}}
+        for row in self._iter_rows(info):
+            if not matches(row):
+                continue
+            key = tuple(row.get(k) for k in keys)
+            group = groups.get(key)
+            if group is None:
+                group = groups[key] = {
+                    **{k: v for k, v in zip(keys, key)},
+                    "count": 0,
+                    **{f: 0.0 for f in sums},
+                }
+            group["count"] += 1
+            totals["count"] += 1
+            for f in sums:
+                value = row.get(f)
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    group[f] += value
+                    totals[f] += value
+
+        order = sums[0] if sums else "count"
+        ranked = sorted(groups.values(), key=lambda g: g[order], reverse=True)
+        for g in [*ranked, totals]:
+            for f in sums:
+                g[f] = round(g[f], 2)
+        return {
+            "table": info.name,
+            "totals": totals,
+            "group_count": len(ranked),
+            "groups": ranked[:max_groups],
+            "truncated": len(ranked) > max_groups,
+        }
 
     def search(self, text: str, table_contains: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
         """Find rows whose character fields contain `text`, across every table (or

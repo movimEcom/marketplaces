@@ -51,12 +51,43 @@ def alpha_query_table(
     contains: dict[str, str] | None = None,
     limit: int = 50,
     offset: int = 0,
+    date_field: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
 ) -> Any:
     """Read rows from a table. `fields` limits the columns returned; `equals`
     filters by exact value per field; `contains` filters by case-insensitive
-    substring per field. Paginate with limit/offset while has_more is true.
-    Read-only: Alpha ERP data is never modified."""
-    return get_data().query(table, fields=fields, equals=equals, contains=contains, limit=limit, offset=offset)
+    substring per field; `date_field` + `date_from`/`date_to` (YYYY-MM-DD,
+    inclusive) filters by a date (type D) field. Paginate with limit/offset
+    while has_more is true. Read-only: Alpha ERP data is never modified."""
+    return get_data().query(
+        table, fields=fields, equals=equals, contains=contains, limit=limit, offset=offset,
+        date_field=date_field, date_from=date_from, date_to=date_to,
+    )
+
+
+@mcp.tool()
+def alpha_aggregate(
+    table: str,
+    group_by: list[str] | None = None,
+    sum_fields: list[str] | None = None,
+    equals: dict[str, Any] | None = None,
+    contains: dict[str, str] | None = None,
+    date_field: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    max_groups: int = 200,
+) -> Any:
+    """Totals for a whole table without paging through it: row count and sums
+    of `sum_fields` per combination of `group_by` fields, after the same
+    filters as alpha_query_table. Use it for reports (sales of a month by
+    customer/channel/product). With only group_by, it lists the distinct
+    values of those fields and how often each appears -- useful to find out
+    which code identifies e.g. the ecommerce channel before filtering on it."""
+    return get_data().aggregate(
+        table, group_by=group_by, sum_fields=sum_fields, equals=equals, contains=contains,
+        date_field=date_field, date_from=date_from, date_to=date_to, max_groups=max_groups,
+    )
 
 
 @mcp.tool()

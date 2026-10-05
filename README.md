@@ -198,8 +198,13 @@ claude mcp add alpha-erp -- uv --directory /ruta/a/marketplaces run alpha-erp-mc
 Tools:
 - `alpha_list_tables(name_contains, refresh)` — tablas .DBF con tamaño y fecha.
 - `alpha_describe_table(table)` — campos, tipos y número de registros.
-- `alpha_query_table(table, fields, equals, contains, limit, offset)` — lee
-  filas con filtros simples y paginación.
+- `alpha_query_table(table, fields, equals, contains, limit, offset,
+  date_field, date_from, date_to)` — lee filas con filtros simples, rango de
+  fechas y paginación.
+- `alpha_aggregate(table, group_by, sum_fields, equals, contains, date_field,
+  date_from, date_to)` — conteos y sumas agrupadas (p. ej. ventas del mes por
+  canal o producto) calculadas sin bajar la tabla completa; solo con
+  `group_by` lista los valores distintos de un campo.
 - `alpha_search(text, table_contains, limit)` — busca un texto (cliente, SKU,
   RFC, folio) en todas las tablas; útil para descubrir el esquema.
 
