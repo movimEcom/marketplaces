@@ -156,7 +156,21 @@ archivos `.DBF` (suele haber una subcarpeta por empresa). El conector las
 recorre todas y nombra cada tabla por su ruta relativa, p. ej.
 `emp01/clientes`.
 
-### Configurar y probar
+### Instalación rápida en Windows
+
+Desde la carpeta del repo, en el servidor (o en la PC que tiene la unidad
+`Y:` mapeada):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup-alpha-windows.ps1
+```
+
+Usa `Y:\ENDOCAT` por defecto (pasa `-DataDir "X:\otra"` para otra ruta).
+Instala `uv`, convierte la unidad mapeada a su ruta `\\SERVIDOR\...` (Claude
+Desktop no siempre ve las unidades mapeadas), escribe `.env`, corre
+`alpha-erp-check` y registra `alpha-erp` en Claude Desktop.
+
+### Configurar y probar a mano
 
 ```bash
 # en .env
