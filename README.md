@@ -208,6 +208,18 @@ Tools:
 - `alpha_search(text, table_contains, limit)` — busca un texto (cliente, SKU,
   RFC, folio) en todas las tablas; útil para descubrir el esquema.
 
+### Reporte fijo de ventas ecommerce
+
+Qué tabla y campos guardan las ventas y cómo se distingue cada canal
+(Mercado Libre, Amazon, Walmart…) depende de cada instalación de Alpha, así
+que se define una vez en `config/alpha_ecommerce_sales.json` (plantilla en
+`config/alpha_ecommerce_sales.example.json`). Con eso todos los meses se
+calculan con el mismo criterio:
+
+- Tool `alpha_ecommerce_sales(month="2026-09")` (o `date_from`/`date_to`):
+  total, por canal, por día y productos más vendidos.
+- Sin Claude: `uv run alpha-erp-sales 2026-09`.
+
 ## Estructura
 
 ```
@@ -224,6 +236,7 @@ src/marketplaces_mcp/alpha/
   config.py     # ALPHA_DATA_DIR, encoding, límite de filas
   dbf.py        # lectura (solo lectura) de las tablas .DBF de Alpha ERP
   check.py      # prueba de conexión (alpha-erp-check)
+  sales.py      # reporte fijo de ventas ecommerce (alpha-erp-sales)
   server.py     # servidor MCP con las tools alpha_* (alpha-erp-mcp)
 ```
 

@@ -12,6 +12,7 @@ from mcp.server.mcpserver import MCPServer
 
 from .config import load_settings
 from .dbf import AlphaData
+from .sales import ecommerce_sales, load_sales_config, month_range
 
 mcp = MCPServer("alpha-erp")
 
@@ -96,6 +97,26 @@ def alpha_search(text: str, table_contains: str | None = None, limit: int = 20) 
     character fields of every table, or only tables whose name includes
     `table_contains`. Slow on large data folders: narrow it when you can."""
     return get_data().search(text, table_contains=table_contains, limit=limit)
+
+
+@mcp.tool()
+def alpha_ecommerce_sales(
+    month: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    top_products: int = 20,
+) -> Any:
+    """Fixed ecommerce sales report: totals per channel (Mercado Libre, Amazon,
+    Walmart...), per day and top products, for a month ('2026-09') or a
+    date_from/date_to range (YYYY-MM-DD). Table, fields and which values
+    identify each channel come from config/alpha_ecommerce_sales.json, so
+    every period uses the same criteria -- prefer this over ad-hoc
+    alpha_aggregate calls for ecommerce sales."""
+    if month:
+        date_from, date_to = month_range(month)
+    if not date_from or not date_to:
+        raise ValueError("Pass month='YYYY-MM' or both date_from and date_to.")
+    return ecommerce_sales(get_data(), load_sales_config(), date_from, date_to, top_products)
 
 
 def main() -> None:

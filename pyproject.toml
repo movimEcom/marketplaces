@@ -18,6 +18,7 @@ meli-mx-quality-report = "marketplaces_mcp.meli.report:main"
 meli-mx-sales-summary = "marketplaces_mcp.meli.sales_summary:main"
 alpha-erp-mcp = "marketplaces_mcp.alpha.server:main"
 alpha-erp-check = "marketplaces_mcp.alpha.check:main"
+alpha-erp-sales = "marketplaces_mcp.alpha.sales:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -1,0 +1,16 @@
+{
+  "_comment": "Copia este archivo como alpha_ecommerce_sales.json y ajusta los nombres a tu Alpha. channels: nombre del canal -> valores de channel_field que le corresponden.",
+  "table": "movs",
+  "date_field": "FECHA",
+  "amount_field": "IMPORTE",
+  "quantity_field": "CANTIDAD",
+  "product_field": "CLAVE",
+  "channel_field": "CLIENTE",
+  "channels": {
+    "Mercado Libre": ["MELI"],
+    "Amazon": ["AMAZON"],
+    "Walmart": ["WALMART"]
+  },
+  "equals": {"TIPO": "V"},
+  "product_lookup": {"table": "producto", "key_field": "CLAVE", "description_field": "DESCRIP"}
+}
