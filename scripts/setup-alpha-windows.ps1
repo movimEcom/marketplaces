@@ -12,7 +12,7 @@ Hace lo siguiente:
   4. Registra el servidor "alpha-erp" en Claude Desktop.
 #>
 param(
-    [string]$DataDir = "Y:\ENDOCAT"
+    [string]$DataDir = "\\endocat2.dyndns.org\vsai\ENDOCAT"
 )
 
 $ErrorActionPreference = "Stop"
