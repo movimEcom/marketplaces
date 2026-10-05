@@ -1,18 +1,22 @@
-<#
+﻿<#
 Configura el conector de Alpha ERP en Windows (correr desde la carpeta del repo):
 
     powershell -ExecutionPolicy Bypass -File scripts\setup-alpha-windows.ps1
     powershell -ExecutionPolicy Bypass -File scripts\setup-alpha-windows.ps1 -DataDir "Y:\OTRA"
+    powershell -ExecutionPolicy Bypass -File scripts\setup-alpha-windows.ps1 -ScanDepth 1   # incluye respaldos por fecha
 
 Hace lo siguiente:
   1. Instala uv si no está.
   2. Convierte la unidad de red (Y:) a su ruta \\SERVIDOR\... para que funcione
      aunque Claude Desktop no vea la unidad mapeada.
-  3. Guarda ALPHA_DATA_DIR en .env y corre alpha-erp-check.
+  3. Guarda ALPHA_DATA_DIR en .env (si se puede) y corre alpha-erp-check.
   4. Registra el servidor "alpha-erp" en Claude Desktop.
 #>
 param(
-    [string]$DataDir = "\\endocat2.dyndns.org\vsai\Empresas\ENDOCAT"
+    [string]$DataDir = "\\endocat2.dyndns.org\vsai\Empresas\ENDOCAT",
+    # 0 = solo las tablas vigentes de la carpeta. Alpha guarda respaldos completos en
+    # subcarpetas por fecha (20260723\, 20260221_001\...): con 1 también se ven esos.
+    [int]$ScanDepth = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -60,6 +64,7 @@ if (-not (Test-Path $resolved)) {
 # La ruta va por variable de entorno (a la prueba y a Claude Desktop), que tiene
 # prioridad sobre .env; guardarla en .env es solo comodidad para correr a mano.
 $env:ALPHA_DATA_DIR = $resolved
+$env:ALPHA_SCAN_DEPTH = "$ScanDepth"
 try {
     if (-not (Test-Path .env)) { Copy-Item .env.example .env }
     $lines = @(Get-Content .env | Where-Object { $_ -notmatch '^ALPHA_DATA_DIR=' })
@@ -84,19 +89,48 @@ Get-ChildItem (Join-Path $env:LOCALAPPDATA "Packages") -Directory -Filter "Claud
 $server = [pscustomobject]@{
     command = $uv
     args    = @("--directory", $repo, "run", "alpha-erp-mcp")
-    env     = [pscustomobject]@{ ALPHA_DATA_DIR = $resolved }
+    env     = [pscustomobject]@{ ALPHA_DATA_DIR = $resolved; ALPHA_SCAN_DEPTH = "$ScanDepth" }
 }
 Write-Host "[4/4] Registrando alpha-erp en Claude Desktop..."
+$registered = 0
 foreach ($dir in $configDirs) {
     $configPath = Join-Path $dir "claude_desktop_config.json"
-    New-Item -ItemType Directory -Force -Path $dir | Out-Null
-    $config = if (Test-Path $configPath) { Get-Content $configPath -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }
-    if (-not $config.PSObject.Properties["mcpServers"]) {
-        $config | Add-Member -NotePropertyName mcpServers -NotePropertyValue ([pscustomobject]@{})
+    try {
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        $config = $null
+        if (Test-Path $configPath) {
+            $raw = Get-Content $configPath -Raw
+            if ($raw -and $raw.Trim()) {
+                try {
+                    $config = $raw | ConvertFrom-Json
+                } catch {
+                    # Un JSON dañado tampoco lo puede leer Claude Desktop: se respalda y se rehace.
+                    $backup = "$configPath.bak-$(Get-Date -Format yyyyMMddHHmmss)"
+                    Copy-Item $configPath $backup
+                    Write-Warning "$configPath no era JSON válido; lo respaldé en $backup y lo rehago."
+                }
+            }
+        }
+        if (-not $config) { $config = [pscustomobject]@{} }
+        if (-not $config.PSObject.Properties["mcpServers"]) {
+            $config | Add-Member -NotePropertyName mcpServers -NotePropertyValue ([pscustomobject]@{})
+        }
+        $config.mcpServers | Add-Member -NotePropertyName "alpha-erp" -NotePropertyValue $server -Force
+        Write-Utf8File $configPath ($config | ConvertTo-Json -Depth 10)
+        Write-Host "Registrado alpha-erp en $configPath"
+        $registered++
+    } catch {
+        Write-Warning "No pude escribir $configPath ($($_.Exception.Message))."
     }
-    $config.mcpServers | Add-Member -NotePropertyName "alpha-erp" -NotePropertyValue $server -Force
-    Write-Utf8File $configPath ($config | ConvertTo-Json -Depth 10)
-    Write-Host "Registrado alpha-erp en $configPath"
+}
+if ($registered -eq 0) {
+    Write-Host ""
+    Write-Host "No pude registrar alpha-erp automáticamente. En Claude Desktop ve a"
+    Write-Host "Configuración > Desarrollador > Editar configuración y deja el archivo así"
+    Write-Host "(si ya tiene otros servidores en mcpServers, agrega solo el bloque alpha-erp):"
+    Write-Host ""
+    Write-Host ([pscustomobject]@{ mcpServers = [pscustomobject]@{ "alpha-erp" = $server } } | ConvertTo-Json -Depth 10)
+    exit 1
 }
 
 Write-Host ""

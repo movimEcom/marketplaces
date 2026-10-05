@@ -165,7 +165,9 @@ Desde la carpeta del repo, en el servidor (o en la PC que tiene la unidad
 powershell -ExecutionPolicy Bypass -File scripts\setup-alpha-windows.ps1
 ```
 
-Usa `\\endocat2.dyndns.org\vsai\Empresas\ENDOCAT` por defecto;
+Usa `\\endocat2.dyndns.org\vsai\Empresas\ENDOCAT` por defecto y solo sus tablas
+vigentes (Alpha guarda respaldos completos en subcarpetas por fecha como
+`20260723\`; `-ScanDepth 1` los incluye);
 pasa `-DataDir "X:\otra"` para otra ruta.
 Instala `uv`, convierte la unidad mapeada a su ruta `\\SERVIDOR\...` (Claude
 Desktop no siempre ve las unidades mapeadas), escribe `.env`, corre
