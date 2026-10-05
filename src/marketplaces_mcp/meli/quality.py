@@ -53,7 +53,14 @@ BANDS = (
     ("critico", 0, 39, "Crítico", "#d03b3b"),
 )
 
-_ITEM_ATTRIBUTES = ["id", "title", "status", "permalink", "user_product_id"]
+_ITEM_ATTRIBUTES = ["id", "title", "status", "permalink", "user_product_id", "category_id", "attributes"]
+
+
+def _extract_attribute_value(attributes: list[dict], attr_id: str) -> str:
+    for attr in attributes or []:
+        if attr.get("id") == attr_id:
+            return attr.get("value_name") or ""
+    return ""
 
 
 def _band_for_score(score: int) -> str:
@@ -75,10 +82,23 @@ class QualityItem:
     is_estimated: bool = False  # True for catalog items -- score is our own heuristic
     level: str = ""
     pending_objectives: list[str] = field(default_factory=list)
+    category_name: str = ""
+    brand: str = ""
 
     @property
     def sort_score(self) -> int:
         return self.score if self.score is not None else -1
+
+    @property
+    def sort_key(self) -> tuple[str, str, str]:
+        """Clase (categoría), marca y artículo (título) -- para agrupar las
+        publicaciones de una misma banda por lo que pidió el usuario."""
+        article = self.title or self.id
+        return (
+            (self.category_name or "￿").lower(),
+            (self.brand or "￿").lower(),
+            article.lower(),
+        )
 
 
 def _estimate_catalog_score(attributes: list[dict], pictures: list, quality_type: str | None) -> int:
@@ -139,6 +159,15 @@ def fetch_quality_report(
     metadata_by_id = {
         raw["id"]: raw for raw in client.multiget_items(item_ids, attributes=_ITEM_ATTRIBUTES)
     }
+    category_names = client.get_category_names(
+        [meta.get("category_id", "") for meta in metadata_by_id.values()]
+    )
+
+    def _category_and_brand(meta: dict) -> tuple[str, str]:
+        category_id = meta.get("category_id", "")
+        category_name = category_names.get(category_id, category_id)
+        brand = _extract_attribute_value(meta.get("attributes", []), "BRAND")
+        return category_name, brand
 
     # Catalog-linked listings (`user_product_id` set) don't have a numeric
     # /performance score at all -- skip calling it for them and resolve their
@@ -158,6 +187,7 @@ def fetch_quality_report(
 
     for item_id, perf in performance_by_id.items():
         meta = metadata_by_id.get(item_id, {})
+        category_name, brand = _category_and_brand(meta)
         score = round(perf.get("score", 0))
         band = _band_for_score(score)
         band_counts[band] += 1
@@ -172,6 +202,8 @@ def fetch_quality_report(
                 score=score,
                 level=perf.get("level", ""),
                 pending_objectives=_pending_objectives(perf),
+                category_name=category_name,
+                brand=brand,
             )
         )
 
@@ -181,6 +213,7 @@ def fetch_quality_report(
     # left unclassified.
     for item_id in errors_by_id:
         meta = metadata_by_id.get(item_id, {})
+        category_name, brand = _category_and_brand(meta)
         band_counts["critico"] += 1
         items.append(
             QualityItem(
@@ -191,6 +224,8 @@ def fetch_quality_report(
                 band="critico",
                 kind="regular",
                 pending_objectives=["Sin datos de calidad (Mercado Libre no la calculó)"],
+                category_name=category_name,
+                brand=brand,
             )
         )
 
@@ -200,6 +235,7 @@ def fetch_quality_report(
     for item_id in catalog_ids:
         meta = metadata_by_id[item_id]
         resolved = catalog_quality.get(meta["user_product_id"])
+        category_name, brand = _category_and_brand(meta)
         if resolved is None:
             # No signal at all -- also straight to Crítico, same as above.
             band_counts["critico"] += 1
@@ -212,6 +248,8 @@ def fetch_quality_report(
                     band="critico",
                     kind="catalog",
                     pending_objectives=["Sin datos suficientes para evaluar la ficha"],
+                    category_name=category_name,
+                    brand=brand,
                 )
             )
             continue
@@ -233,6 +271,8 @@ def fetch_quality_report(
                 score=score,
                 is_estimated=True,
                 pending_objectives=objectives,
+                category_name=category_name,
+                brand=brand,
             )
         )
 
@@ -253,15 +293,17 @@ def _esc(text: str) -> str:
     return html_escape.escape(text, quote=True)
 
 
-def _stat_tile(key: str, low: int, high: int, label: str, color: str, count: int) -> str:
+def _stat_tile(key: str, low: int, high: int, label: str, color: str, count: int, is_default: bool) -> str:
     range_label = f"{low}–100" if high == 100 else f"{low}–{high}" if key != "critico" else f"< {high + 1}"
+    active_class = " tile-active" if is_default else ""
     return f"""
-    <div class="tile">
+    <button type="button" class="tile{active_class}" data-band="{key}" data-label="{_esc(label)}"
+            onclick="showBand(this)" aria-pressed="{"true" if is_default else "false"}">
       <span class="tile-icon" style="background:{color}" aria-hidden="true"></span>
       <div class="tile-value">{count}</div>
       <div class="tile-label">{_esc(label)}</div>
       <div class="tile-range">{range_label}</div>
-    </div>"""
+    </button>"""
 
 
 def _item_row(item: QualityItem, color_by_band: dict[str, str]) -> str:
@@ -273,11 +315,15 @@ def _item_row(item: QualityItem, color_by_band: dict[str, str]) -> str:
     if item.is_estimated:
         score_display += " (estimado)"
     kind_label = "Regular" if item.kind == "regular" else "Catálogo"
+    category = _esc(item.category_name) or "—"
+    brand = _esc(item.brand) or "—"
     return f"""
         <tr>
           <td class="num">{score_display}</td>
           <td><span class="dot" style="background:{color}"></span>{item.band.capitalize()}</td>
           <td>{kind_label}</td>
+          <td>{category}</td>
+          <td>{brand}</td>
           <td><a href="{link}" target="_blank" rel="noopener">{title}</a></td>
           <td>{_esc(objectives)}</td>
         </tr>"""
@@ -285,37 +331,54 @@ def _item_row(item: QualityItem, color_by_band: dict[str, str]) -> str:
 
 def render_html(report: QualityReport, seller_label: str = "") -> str:
     color_by_band = {key: color for key, *_rest, color in BANDS}
+    label_by_band = {key: label for key, *_rest1, label, _color in BANDS}
+
+    # Preselect whichever band most needs attention, so the dashboard opens
+    # already showing something useful instead of an empty table.
+    default_band = next(
+        (key for key in ("critico", "mejorable", "bueno", "excelente") if report.band_counts.get(key, 0)),
+        BANDS[0][0],
+    )
+
     tiles = "".join(
-        _stat_tile(key, low, high, label, color, report.band_counts.get(key, 0))
+        _stat_tile(key, low, high, label, color, report.band_counts.get(key, 0), key == default_band)
         for key, low, high, label, color in BANDS
     )
 
-    attention_items = [i for i in report.items if i.band in ("mejorable", "critico")]
-    if attention_items:
-        rows = "".join(_item_row(item, color_by_band) for item in attention_items[:300])
-        table_note = (
-            f"Mostrando {min(len(attention_items), 300)} de {len(attention_items)} "
-            "publicaciones en banda Mejorable o Crítico, ordenadas de menor a mayor score. "
-            "Los scores marcados \"(estimado)\" son de publicaciones de catálogo: Mercado "
-            "Libre no expone un score 0-100 para esas (la ficha es compartida entre "
-            "vendedores), así que lo calculamos nosotros a partir de qué tan completa "
-            "está la ficha -- no es el dato oficial de Mercado Libre."
-        )
-        table_html = f"""
-        <table>
+    band_tables = []
+    for key, _low, _high, _label, _color in BANDS:
+        band_items = sorted(report.items_in_band(key), key=lambda item: item.sort_key)
+        display_style = "" if key == default_band else " style=\"display:none\""
+        if band_items:
+            rows = "".join(_item_row(item, color_by_band) for item in band_items)
+            body = f"""
+        <table class="band-table" data-band="{key}"{display_style}>
           <thead>
-            <tr><th>Score</th><th>Banda</th><th>Tipo</th><th>Publicación</th><th>Objetivos pendientes</th></tr>
+            <tr><th>Score</th><th>Banda</th><th>Tipo</th><th>Categoría</th><th>Marca</th><th>Artículo</th><th>Objetivos pendientes</th></tr>
           </thead>
           <tbody>{rows}
           </tbody>
-        </table>
-        <p class="muted">{table_note}</p>"""
-    else:
-        table_html = '<p class="muted">No hay publicaciones en banda Mejorable o Crítico. \U0001F389</p>'
+        </table>"""
+        else:
+            body = (
+                f'<p class="band-table muted" data-band="{key}"{display_style}>'
+                f"No hay publicaciones en banda {_esc(_label)}. \U0001F389</p>"
+            )
+        band_tables.append(body)
+    tables_html = "".join(band_tables)
+
+    table_note = (
+        "Ordenadas por clase (categoría), marca y artículo. Los scores marcados "
+        "\"(estimado)\" son de publicaciones de catálogo: Mercado Libre no expone un "
+        "score 0-100 para esas (la ficha es compartida entre vendedores), así que lo "
+        "calculamos nosotros a partir de qué tan completa está la ficha -- no es el "
+        "dato oficial de Mercado Libre."
+    )
 
     generated_local = report.generated_at.replace("T", " ").split(".")[0] + " UTC"
     skipped_note = f" · {report.skipped} sin datos de calidad" if report.skipped else ""
     subtitle = f"Mercado Libre México{' · ' + _esc(seller_label) if seller_label else ''}"
+    default_label = _esc(label_by_band[default_band])
 
     return f"""<!DOCTYPE html>
 <html lang="es">
@@ -381,6 +444,23 @@ def render_html(report: QualityReport, seller_label: str = "") -> str:
     border-radius: 12px;
     padding: 16px;
     position: relative;
+    display: block;
+    width: 100%;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+  }}
+  .tile:hover {{
+    border-color: var(--ink-muted);
+  }}
+  .tile:focus-visible {{
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }}
+  .tile-active {{
+    border-color: var(--ink);
+    border-width: 2px;
   }}
   .tile-icon {{
     display: inline-block;
@@ -453,9 +533,24 @@ def render_html(report: QualityReport, seller_label: str = "") -> str:
   <div class="content">
     <div class="tiles">{tiles}
     </div>
-    <h2>Publicaciones que necesitan atención</h2>
-    {table_html}
+    <h2>Publicaciones — <span id="table-title">{default_label}</span></h2>
+    {tables_html}
+    <p class="muted">{table_note}</p>
   </div>
+  <script>
+    function showBand(tile) {{
+      var band = tile.dataset.band;
+      document.querySelectorAll(".band-table").forEach(function (el) {{
+        el.style.display = el.dataset.band === band ? "" : "none";
+      }});
+      document.querySelectorAll(".tile").forEach(function (el) {{
+        var active = el.dataset.band === band;
+        el.classList.toggle("tile-active", active);
+        el.setAttribute("aria-pressed", active ? "true" : "false");
+      }});
+      document.getElementById("table-title").textContent = tile.dataset.label;
+    }}
+  </script>
 </body>
 </html>
 """

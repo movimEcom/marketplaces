@@ -177,8 +177,30 @@ class MeliClient:
     def get_categories(self) -> Any:
         return self._get(f"/sites/{self.site_id}/categories")
 
+    def get_category(self, category_id: str) -> Any:
+        return self._get(f"/categories/{category_id}")
+
     def get_category_attributes(self, category_id: str) -> Any:
         return self._get(f"/categories/{category_id}/attributes")
+
+    def get_category_names(self, category_ids: list[str], max_workers: int = 8) -> dict[str, str]:
+        """Resolve category ids (e.g. "MLM1744") to their human-readable
+        name, deduplicated and fetched concurrently -- there's no multiget
+        for `/categories`."""
+        unique_ids = sorted({cid for cid in category_ids if cid})
+        names: dict[str, str] = {}
+
+        def fetch(category_id: str) -> tuple[str, str | None]:
+            try:
+                return category_id, self.get_category(category_id).get("name")
+            except httpx.HTTPStatusError:
+                return category_id, None
+
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            for category_id, name in pool.map(fetch, unique_ids):
+                if name:
+                    names[category_id] = name
+        return names
 
     # -- seller: listings -------------------------------------------------
 
