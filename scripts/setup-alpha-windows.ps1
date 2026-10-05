@@ -22,6 +22,7 @@ $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
 
 # 1. uv
+Write-Host "[1/4] Revisando uv..."
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     Write-Host "Instalando uv..."
     powershell -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
@@ -31,6 +32,7 @@ $uv = (Get-Command uv).Source
 
 # 2. Unidad mapeada -> ruta UNC (las unidades mapeadas son por usuario/sesión
 #    y a veces no existen para procesos lanzados por otras apps).
+Write-Host "[2/4] Revisando acceso a $DataDir ..."
 $resolved = $DataDir
 if ($DataDir -match '^([A-Za-z]):\\?(.*)$') {
     $drive = Get-PSDrive -Name $Matches[1] -ErrorAction SilentlyContinue
@@ -49,6 +51,7 @@ $lines = Get-Content .env | Where-Object { $_ -notmatch '^ALPHA_DATA_DIR=' }
 $lines += "ALPHA_DATA_DIR=$resolved"
 [IO.File]::WriteAllLines((Join-Path $repo ".env"), [string[]]$lines, $utf8)
 
+Write-Host "[3/4] Instalando dependencias (uv sync)..."
 & $uv sync
 Write-Host "Buscando tablas .DBF en $resolved (por la VPN puede tardar un poco)..."
 & $uv run alpha-erp-check
@@ -65,6 +68,7 @@ $server = [pscustomobject]@{
     args    = @("--directory", $repo, "run", "alpha-erp-mcp")
     env     = [pscustomobject]@{ ALPHA_DATA_DIR = $resolved }
 }
+Write-Host "[4/4] Registrando alpha-erp en Claude Desktop..."
 foreach ($dir in $configDirs) {
     $configPath = Join-Path $dir "claude_desktop_config.json"
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
