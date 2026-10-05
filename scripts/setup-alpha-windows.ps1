@@ -18,6 +18,17 @@ param(
 $ErrorActionPreference = "Stop"
 # UTF-8 sin BOM: Windows PowerShell 5 agrega BOM con -Encoding UTF8 y rompe el JSON de Claude Desktop.
 $utf8 = New-Object System.Text.UTF8Encoding($false)
+
+function Write-Utf8File([string]$Path, [string]$Text) {
+    # .NET rechaza sobrescribir archivos ocultos o de solo lectura ("Acceso denegado"):
+    # se quitan esos atributos antes de escribir.
+    if (Test-Path -LiteralPath $Path) {
+        $item = Get-Item -LiteralPath $Path -Force
+        $attrs = $item.Attributes -band -bnot ([IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::ReadOnly)
+        $item.Attributes = if ($attrs -eq 0) { [IO.FileAttributes]::Normal } else { $attrs }
+    }
+    [IO.File]::WriteAllText($Path, $Text, $utf8)
+}
 $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
 
@@ -47,9 +58,9 @@ if (-not (Test-Path $resolved)) {
 
 # 3. .env + prueba
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
-$lines = Get-Content .env | Where-Object { $_ -notmatch '^ALPHA_DATA_DIR=' }
+$lines = @(Get-Content .env | Where-Object { $_ -notmatch '^ALPHA_DATA_DIR=' })
 $lines += "ALPHA_DATA_DIR=$resolved"
-[IO.File]::WriteAllLines((Join-Path $repo ".env"), [string[]]$lines, $utf8)
+Write-Utf8File (Join-Path $repo ".env") (($lines -join "`r`n") + "`r`n")
 
 Write-Host "[3/4] Instalando dependencias (uv sync)..."
 & $uv sync
@@ -77,7 +88,7 @@ foreach ($dir in $configDirs) {
         $config | Add-Member -NotePropertyName mcpServers -NotePropertyValue ([pscustomobject]@{})
     }
     $config.mcpServers | Add-Member -NotePropertyName "alpha-erp" -NotePropertyValue $server -Force
-    [IO.File]::WriteAllText($configPath, ($config | ConvertTo-Json -Depth 10), $utf8)
+    Write-Utf8File $configPath ($config | ConvertTo-Json -Depth 10)
     Write-Host "Registrado alpha-erp en $configPath"
 }
 
